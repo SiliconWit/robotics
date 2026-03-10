@@ -1,0 +1,1058 @@
+---
+title: "Lesson 4: Velocity Kinematics and the Jacobian"
+description: "Derive and apply the Jacobian matrix for velocity mapping, singularity detection, and manipulability analysis in collaborative robots"
+contributors: "sam-macharia"
+pubDate: 2026-03-10
+tags: ["robotics", "jacobian-matrix", "velocity-kinematics", "singularity", "manipulability", "collaborative-robot", "pseudoinverse", "force-mapping"]
+excerpt: "Explore velocity kinematics through collaborative robot applications. Derive the Jacobian matrix, perform forward and inverse velocity mapping, detect singularities, analyze manipulability ellipsoids, and apply pseudoinverse methods for redundant manipulators."
+heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+---
+
+import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
+import TawkWidget from '../../../../components/TawkWidget.astro';
+import UniversalContentContributors from '../../../../components/UniversalContentContributors.astro';
+import InArticleAd from '../../../../components/InArticleAd.astro';
+import Copyright from '../../../../components/Copyright.astro';
+import BionicText from '../../../../components/BionicText.astro';
+import TailwindWrapper from '../../../../components/TailwindWrapper.jsx';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/starlight/components';
+
+<UniversalContentContributors 
+  contributors={frontmatter.contributors}
+/>
+
+
+
+When a collaborative robot hands you a cup of coffee, it needs to move its end-effector smoothly through space at a controlled velocity. But the robot's motors operate in joint space, spinning individual joints at angular rates. The Jacobian matrix is the bridge between these two worlds, translating joint velocities into end-effector velocities and vice versa. It also reveals dangerous configurations where the robot loses the ability to move in certain directions, and it provides the mathematical foundation for force control in human-robot collaboration. #robotics #jacobian #velocity-kinematics
+
+## 🎯 Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. **Derive** the Jacobian matrix for serial robot manipulators <Badge text="Core Theory" variant="note" />
+2. **Compute** forward and inverse velocity mappings between joint space and task space <Badge text="Analysis" variant="tip" />
+3. **Detect** singularities and interpret their physical meaning <Badge text="Critical" variant="danger" />
+4. **Visualize** manipulability ellipsoids using singular value decomposition <Badge text="Advanced" variant="caution" />
+5. **Apply** the pseudoinverse method for redundant manipulators <Badge text="Practical" variant="success" />
+6. **Map** end-effector forces to joint torques using the Jacobian transpose <Badge text="Force Control" variant="note" />
+
+## 🔧 Real-World Engineering Challenge: Collaborative Robot with Force-Limited Operation
+
+<InArticleAd />
+
+
+A collaborative robot on a manufacturing line must hand components to a human worker. Safety regulations (ISO/TS 15066) require that contact forces never exceed 150 N at the end-effector. The robot controller needs to continuously monitor how joint torques translate into end-effector forces, and it must detect configurations where the robot could inadvertently generate excessive forces due to mechanical advantage near singularities. The Jacobian matrix provides exactly this capability: it maps between joint-space quantities (velocities, torques) and task-space quantities (end-effector velocities, forces) in real time.
+
+### System Challenge: Safe Velocity and Force Control
+
+**Critical Engineering Questions:**
+
+:::note[Questions to Answer in This Lesson]
+- How do we compute end-effector velocity from measured joint velocities?
+- Given a desired end-effector trajectory, what joint velocities are required?
+- At what configurations does the robot lose dexterity, and what happens physically?
+- How do we ensure that joint torques never produce unsafe end-effector forces?
+- For a redundant robot (more joints than task DOF), how do we choose among infinite solutions?
+:::
+
+### Why the Jacobian Is Essential for Collaborative Robots
+
+In traditional industrial robots behind safety cages, singularity avoidance and force control are important but not safety-critical in the same way. Collaborative robots operate in shared workspaces with humans, so the consequences of uncontrolled motion or unexpected forces are immediate and potentially dangerous. The Jacobian provides the mathematical framework for: (1) real-time velocity monitoring to ensure smooth, predictable motion, (2) force limiting by mapping joint torques to end-effector forces, (3) singularity detection to prevent loss of control, and (4) manipulability analysis to plan paths through high-dexterity configurations.
+
+<Card title="Collaborative Robot Design Challenge" icon="rocket">
+**Design Goal:** Implement Jacobian-based velocity and force control for a collaborative 2R planar robot, with extensions to redundant 3R configurations.
+
+**Key Requirements:**
+- **Velocity Mapping**: Compute end-effector velocity from joint rates in real time
+- **Trajectory Tracking**: Generate joint velocities for straight-line end-effector paths
+- **Singularity Monitoring**: Detect and avoid configurations where control degrades
+- **Force Safety**: Ensure end-effector forces stay within ISO/TS 15066 limits
+</Card>
+
+## 📚 Fundamental Theory
+
+<InArticleAd />
+
+
+### What is the Jacobian?
+
+The Jacobian is a matrix of partial derivatives that describes how small changes in one set of variables produce changes in another set. In robotics, the Jacobian relates joint velocities to end-effector velocities. Think of it as a "gear ratio matrix" that changes with the robot's configuration.
+
+**Simple Analogies:**
+
+<CardGrid>
+  <Card title="Bicycle Gear Ratio" icon="seti:gear">
+    On a bicycle, the gear ratio determines how pedal rotation speed translates to wheel rotation speed. The Jacobian is the robotic equivalent, but instead of a single ratio, it is an entire matrix because the robot has multiple joints and the end-effector moves in multiple directions. And unlike a fixed gear ratio, the Jacobian changes as the robot moves.
+  </Card>
+  <Card title="Puppet Strings" icon="pencil">
+    A puppeteer pulls strings (joint velocities) to make a puppet's hand move (end-effector velocity). The relationship between string pulls and hand motion depends on the puppet's current pose. Some poses make the hand easy to move in all directions; others make certain directions difficult or impossible. The Jacobian captures exactly this configuration-dependent relationship.
+  </Card>
+</CardGrid>
+
+### Mathematical Definition
+
+For a general $n$-DOF robot with forward kinematics $\mathbf{x} = f(\mathbf{q})$, where $\mathbf{q} \in \mathbb{R}^n$ is the joint variable vector and $\mathbf{x} \in \mathbb{R}^m$ is the task-space vector, the Jacobian matrix is defined as:
+
+$$
+J(\mathbf{q}) = \frac{\partial f(\mathbf{q})}{\partial \mathbf{q}} = \begin{bmatrix} \frac{\partial f_1}{\partial q_1} & \frac{\partial f_1}{\partial q_2} & \cdots & \frac{\partial f_1}{\partial q_n} \\ \frac{\partial f_2}{\partial q_1} & \frac{\partial f_2}{\partial q_2} & \cdots & \frac{\partial f_2}{\partial q_n} \\ \vdots & \vdots & \ddots & \vdots \\ \frac{\partial f_m}{\partial q_1} & \frac{\partial f_m}{\partial q_2} & \cdots & \frac{\partial f_m}{\partial q_n} \end{bmatrix}
+$$
+
+The velocity relationship is then:
+
+$$
+\dot{\mathbf{x}} = J(\mathbf{q}) \, \dot{\mathbf{q}}
+$$
+
+where $\dot{\mathbf{q}}$ is the vector of joint velocities and $\dot{\mathbf{x}}$ is the end-effector velocity vector.
+
+:::note[Jacobian Dimensions]
+The Jacobian $J$ is an $m \times n$ matrix, where $m$ is the dimension of the task space and $n$ is the number of joints. For a planar 2R robot operating in 2D position space: $m = 2$, $n = 2$, so $J$ is $2 \times 2$. For a spatial 6-DOF robot with full position and orientation: $m = 6$, $n = 6$, so $J$ is $6 \times 6$.
+:::
+
+### Full Derivation: 2-Link Planar Robot (2R)
+
+Let us derive the Jacobian step by step for a 2R planar robot with link lengths $L_1$ and $L_2$, and joint angles $\theta_1$ and $\theta_2$.
+
+#### Step 1: Forward Kinematics Equations
+
+The end-effector position $(x, y)$ in terms of the joint angles is:
+
+$$
+x = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)
+$$
+
+$$
+y = L_1 \sin\theta_1 + L_2 \sin(\theta_1 + \theta_2)
+$$
+
+Here, $\theta_1$ is measured from the positive $x$-axis, and $\theta_2$ is the relative angle of link 2 with respect to link 1.
+
+#### Step 2: Compute Partial Derivatives
+
+We need four partial derivatives to build the $2 \times 2$ Jacobian.
+
+**Partial derivatives of $x$:**
+
+$$
+\frac{\partial x}{\partial \theta_1} = -L_1 \sin\theta_1 - L_2 \sin(\theta_1 + \theta_2)
+$$
+
+$$
+\frac{\partial x}{\partial \theta_2} = -L_2 \sin(\theta_1 + \theta_2)
+$$
+
+**Partial derivatives of $y$:**
+
+$$
+\frac{\partial y}{\partial \theta_1} = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)
+$$
+
+$$
+\frac{\partial y}{\partial \theta_2} = L_2 \cos(\theta_1 + \theta_2)
+$$
+
+<details>
+<summary>**Detailed differentiation walkthrough**</summary>
+
+Consider $x = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)$. Differentiating with respect to $\theta_1$: the first term gives $-L_1 \sin\theta_1$ by the chain rule. The second term gives $-L_2 \sin(\theta_1 + \theta_2) \cdot 1$ because $\theta_1$ appears inside $(\theta_1 + \theta_2)$. Now differentiating with respect to $\theta_2$: the first term $L_1 \cos\theta_1$ has no $\theta_2$ dependence, so it vanishes. The second term gives $-L_2 \sin(\theta_1 + \theta_2) \cdot 1$. The same logic applies to the $y$ equations using derivatives of $\sin$.
+
+</details>
+
+#### Step 3: Assemble the Jacobian Matrix
+
+Combining all four partial derivatives into matrix form:
+
+$$
+J(\theta_1, \theta_2) = \begin{bmatrix} -L_1 \sin\theta_1 - L_2 \sin(\theta_1 + \theta_2) & -L_2 \sin(\theta_1 + \theta_2) \\ L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2) & L_2 \cos(\theta_1 + \theta_2) \end{bmatrix}
+$$
+
+For notational convenience, let $s_1 = \sin\theta_1$, $c_1 = \cos\theta_1$, $s_{12} = \sin(\theta_1 + \theta_2)$, $c_{12} = \cos(\theta_1 + \theta_2)$:
+
+$$
+J = \begin{bmatrix} -L_1 s_1 - L_2 s_{12} & -L_2 s_{12} \\ L_1 c_1 + L_2 c_{12} & L_2 c_{12} \end{bmatrix}
+$$
+
+The velocity mapping equation becomes:
+
+$$
+\begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix} = \begin{bmatrix} -L_1 s_1 - L_2 s_{12} & -L_2 s_{12} \\ L_1 c_1 + L_2 c_{12} & L_2 c_{12} \end{bmatrix} \begin{bmatrix} \dot{\theta}_1 \\ \dot{\theta}_2 \end{bmatrix}
+$$
+
+### Forward and Inverse Velocity Mapping
+
+<Tabs>
+<TabItem label="Forward Velocity Mapping">
+
+**Problem:** Given joint velocities $\dot{\theta}_1$ and $\dot{\theta}_2$, find end-effector velocity $(\dot{x}, \dot{y})$.
+
+**Method:** Direct matrix multiplication.
+
+$$
+\dot{\mathbf{x}} = J(\mathbf{q}) \, \dot{\mathbf{q}}
+$$
+
+This is always straightforward because the Jacobian is computed from the current configuration $\mathbf{q}$ and the multiplication is a simple linear operation.
+
+**When to use:** Monitoring the actual end-effector velocity from measured joint encoder rates. This is critical for collaborative robots to verify that the end-effector is not moving too fast near a human worker.
+
+</TabItem>
+<TabItem label="Inverse Velocity Mapping">
+
+**Problem:** Given a desired end-effector velocity $(\dot{x}, \dot{y})$, find the required joint velocities $\dot{\theta}_1$ and $\dot{\theta}_2$.
+
+**Method:** Solve the linear system by inverting the Jacobian (when it is square and non-singular).
+
+$$
+\dot{\mathbf{q}} = J^{-1}(\mathbf{q}) \, \dot{\mathbf{x}}
+$$
+
+For the 2R robot, the inverse of the $2 \times 2$ Jacobian is:
+
+$$
+J^{-1} = \frac{1}{\det(J)} \begin{bmatrix} L_2 c_{12} & L_2 s_{12} \\ -L_1 c_1 - L_2 c_{12} & -L_1 s_1 - L_2 s_{12} \end{bmatrix}
+$$
+
+**When to use:** Trajectory tracking, where you specify a desired path in task space (such as a straight line) and need to compute the corresponding joint velocities at each time step.
+
+:::note[Critical Warning]
+The inverse $J^{-1}$ only exists when $\det(J) \neq 0$. At singularities, $\det(J) = 0$ and the inverse mapping breaks down, meaning no finite joint velocities can produce certain end-effector velocities.
+:::
+
+</TabItem>
+</Tabs>
+
+### Numerical Example
+
+Let us work through a complete numerical example to solidify the concepts. Consider a 2R robot with $L_1 = 1.0$ m, $L_2 = 0.8$ m, at configuration $\theta_1 = 45°$, $\theta_2 = 30°$. The joints are moving at $\dot{\theta}_1 = 2.0$ rad/s and $\dot{\theta}_2 = -1.0$ rad/s.
+
+<Steps>
+
+1. **Compute trigonometric values:**
+
+   $\theta_1 = 45° = \pi/4$, so $s_1 = 0.7071$, $c_1 = 0.7071$
+
+   $\theta_1 + \theta_2 = 75°$, so $s_{12} = 0.9659$, $c_{12} = 0.2588$
+
+2. **Build the Jacobian:**
+
+   $$
+   J = \begin{bmatrix} -1.0(0.7071) - 0.8(0.9659) & -0.8(0.9659) \\ 1.0(0.7071) + 0.8(0.2588) & 0.8(0.2588) \end{bmatrix}
+   $$
+
+   $$
+   J = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9141 & 0.2071 \end{bmatrix}
+   $$
+
+3. **Forward velocity mapping:**
+
+   $$
+   \begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix} = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9141 & 0.2071 \end{bmatrix} \begin{bmatrix} 2.0 \\ -1.0 \end{bmatrix}
+   $$
+
+   $$
+   \dot{x} = (-1.4798)(2.0) + (-0.7727)(-1.0) = -2.9596 + 0.7727 = -2.187 \text{ m/s}
+   $$
+
+   $$
+   \dot{y} = (0.9141)(2.0) + (0.2071)(-1.0) = 1.8282 - 0.2071 = 1.621 \text{ m/s}
+   $$
+
+   The end-effector speed is $\|\dot{\mathbf{x}}\| = \sqrt{(-2.187)^2 + (1.621)^2} = 2.72$ m/s.
+
+4. **Compute the determinant:**
+
+   $$
+   \det(J) = (-1.4798)(0.2071) - (-0.7727)(0.9141)
+   $$
+
+   $$
+   \det(J) = -0.3065 + 0.7064 = 0.3999
+   $$
+
+   Since $\det(J) \neq 0$, the robot is not at a singularity and the inverse velocity mapping is well-defined.
+
+5. **Inverse velocity example:** Suppose we want $\dot{x} = 0.5$ m/s, $\dot{y} = 0.0$ m/s (pure horizontal motion). Then:
+
+   $$
+   \begin{bmatrix} \dot{\theta}_1 \\ \dot{\theta}_2 \end{bmatrix} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9141 & -1.4798 \end{bmatrix} \begin{bmatrix} 0.5 \\ 0.0 \end{bmatrix}
+   $$
+
+   $$
+   \dot{\theta}_1 = \frac{(0.2071)(0.5)}{0.3999} = 0.259 \text{ rad/s}
+   $$
+
+   $$
+   \dot{\theta}_2 = \frac{(-0.9141)(0.5)}{0.3999} = -1.143 \text{ rad/s}
+   $$
+
+</Steps>
+
+:::note[Physical Interpretation]
+To move the end-effector horizontally to the right at 0.5 m/s from this configuration, joint 1 must rotate slowly counterclockwise (0.259 rad/s) while joint 2 must rotate clockwise more rapidly (-1.143 rad/s). The ratio of joint speeds depends entirely on the current configuration through the Jacobian.
+:::
+
+### Singularity Analysis
+
+Singularities are configurations where the Jacobian loses rank, meaning the robot cannot generate end-effector velocities in certain directions regardless of how fast the joints move. Detecting and avoiding singularities is essential for safe robot operation.
+
+#### Determinant of the Jacobian
+
+For the 2R robot, the determinant is:
+
+$$
+\det(J) = (-L_1 s_1 - L_2 s_{12})(L_2 c_{12}) - (-L_2 s_{12})(L_1 c_1 + L_2 c_{12})
+$$
+
+Expanding and simplifying using the identity $\sin A \cos B - \cos A \sin B = \sin(A - B)$:
+
+$$
+\det(J) = L_1 L_2 (s_{12} c_1 - s_1 c_{12}) = L_1 L_2 \sin(\theta_1 + \theta_2 - \theta_1)
+$$
+
+$$
+\boxed{\det(J) = L_1 L_2 \sin\theta_2}
+$$
+
+<details>
+<summary>**Step-by-step determinant simplification**</summary>
+
+Starting from the expanded determinant:
+$\det(J) = -L_1 L_2 s_1 c_{12} - L_2^2 s_{12} c_{12} + L_1 L_2 s_{12} c_1 + L_2^2 s_{12} c_{12}$
+
+The $L_2^2$ terms cancel: $\det(J) = L_1 L_2 (s_{12} c_1 - s_1 c_{12})$
+
+Now apply the subtraction formula: $\sin(\alpha - \beta) = \sin\alpha \cos\beta - \cos\alpha \sin\beta$
+
+With $\alpha = \theta_1 + \theta_2$ and $\beta = \theta_1$: $s_{12} c_1 - c_{12} s_1 = \sin(\theta_1 + \theta_2 - \theta_1) = \sin\theta_2$
+
+Therefore: $\det(J) = L_1 L_2 \sin\theta_2$
+
+</details>
+
+#### Singular Configurations
+
+The singularity condition $\det(J) = 0$ occurs when $\sin\theta_2 = 0$, which means $\theta_2 = 0°$ or $\theta_2 = 180°$.
+
+<Tabs>
+<TabItem label="Fully Extended (theta2 = 0)">
+
+**Configuration:** Both links are collinear, pointing in the same direction.
+
+**Physical meaning:** The end-effector is at the maximum reach $r = L_1 + L_2$. At this boundary, the robot cannot move radially outward because it is already fully stretched. Both joints can only produce tangential (circular) motion. One degree of freedom in task space is lost.
+
+**Consequence for collaborative robots:** Near full extension, even small radial velocity demands require extremely large joint velocities, which is dangerous. The controller must slow down or redirect the trajectory well before reaching this configuration.
+
+</TabItem>
+<TabItem label="Fully Folded (theta2 = 180)">
+
+**Configuration:** Link 2 folds back on link 1, so the end-effector is at minimum reach $r = |L_1 - L_2|$.
+
+**Physical meaning:** The robot is at its inner workspace boundary. Similar to the extended case, radial motion toward the base is impossible. If $L_1 = L_2$, the end-effector reaches the base and the entire arm collapses to a point, losing all directional control.
+
+**Consequence for collaborative robots:** Folded configurations can cause rapid, unpredictable accelerations when the robot tries to "unfold." Force monitoring must be especially vigilant near these poses.
+
+</TabItem>
+</Tabs>
+
+:::note[Singularity and the Determinant Value]
+The absolute value $|\det(J)|$ provides a scalar measure of "closeness to singularity." When $|\det(J)|$ is large, the robot has good dexterity. As it approaches zero, joint velocities grow unbounded for finite task-space velocities. In practice, controllers set a threshold (e.g., $|\det(J)| < \epsilon$) and switch to damped least-squares methods near singularities.
+:::
+
+### Manipulability Ellipsoids
+
+The manipulability ellipsoid provides a geometric visualization of the robot's velocity capability at any configuration. If all joints move at unit speed ($\|\dot{\mathbf{q}}\| \leq 1$), the set of achievable end-effector velocities forms an ellipsoid in task space. The shape and size of this ellipsoid reveal directional preferences and overall dexterity.
+
+The ellipsoid is determined by the **singular value decomposition (SVD)** of the Jacobian:
+
+$$
+J = U \Sigma V^T
+$$
+
+where $\Sigma = \text{diag}(\sigma_1, \sigma_2, \ldots)$ contains the singular values, $U$ defines the principal directions in task space, and $V$ defines the principal directions in joint space.
+
+**Key properties:**
+- The **semi-axes** of the ellipsoid have lengths equal to the singular values $\sigma_1, \sigma_2, \ldots$
+- The **directions** of the semi-axes are the columns of $U$
+- The **manipulability index** is $w = \sigma_1 \cdot \sigma_2 \cdot \ldots = |\det(J)|$ (for square Jacobians)
+- The **condition number** $\kappa = \sigma_{\max} / \sigma_{\min}$ measures isotropy ($\kappa = 1$ is perfectly isotropic)
+
+<Card title="Interpreting the Manipulability Ellipsoid" icon="information">
+**Large, circular ellipsoid:** The robot can move the end-effector equally well in all directions. This is the ideal configuration for collaborative tasks.
+
+**Elongated ellipsoid:** The robot moves easily along the major axis but poorly along the minor axis. The task should be oriented along the major axis if possible.
+
+**Degenerate (flat) ellipsoid:** One singular value is near zero, indicating proximity to a singularity. The robot effectively loses one DOF. Avoid this configuration.
+</Card>
+
+### Pseudoinverse for Redundant Robots
+
+When a robot has more joints than task-space dimensions (e.g., a 3R planar robot controlling 2D position), the system is redundant. There are infinitely many joint velocity solutions for any desired end-effector velocity. The Moore-Penrose pseudoinverse provides the minimum-norm solution, and the null space allows additional objectives like singularity avoidance or joint limit avoidance.
+
+For a redundant robot with $m \times n$ Jacobian ($n > m$), the pseudoinverse is:
+
+$$
+J^{\dagger} = J^T (J J^T)^{-1}
+$$
+
+The general solution to $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$ is:
+
+$$
+\dot{\mathbf{q}} = J^{\dagger} \dot{\mathbf{x}} + (I - J^{\dagger} J) \mathbf{z}
+$$
+
+where $\mathbf{z} \in \mathbb{R}^n$ is an arbitrary vector, and $(I - J^{\dagger} J)$ projects it onto the null space of $J$.
+
+**3-Link Planar Robot Example:**
+
+For a 3R robot with link lengths $L_1, L_2, L_3$ and joint angles $\theta_1, \theta_2, \theta_3$:
+
+$$
+x = L_1 c_1 + L_2 c_{12} + L_3 c_{123}
+$$
+
+$$
+y = L_1 s_1 + L_2 s_{12} + L_3 s_{123}
+$$
+
+The Jacobian is $2 \times 3$:
+
+$$
+J = \begin{bmatrix} -L_1 s_1 - L_2 s_{12} - L_3 s_{123} & -L_2 s_{12} - L_3 s_{123} & -L_3 s_{123} \\ L_1 c_1 + L_2 c_{12} + L_3 c_{123} & L_2 c_{12} + L_3 c_{123} & L_3 c_{123} \end{bmatrix}
+$$
+
+where $c_{123} = \cos(\theta_1 + \theta_2 + \theta_3)$ and $s_{123} = \sin(\theta_1 + \theta_2 + \theta_3)$.
+
+The null space has dimension $n - m = 3 - 2 = 1$, meaning one DOF of internal motion can reconfigure the arm without moving the end-effector. This extra freedom is used for:
+
+- **Singularity avoidance:** Choose $\mathbf{z}$ to maximize $|\det(J J^T)|$
+- **Joint limit avoidance:** Choose $\mathbf{z}$ to push joints away from their limits
+- **Obstacle avoidance:** Choose $\mathbf{z}$ to move the elbow away from obstacles
+
+### Force and Torque Mapping
+
+The Jacobian also relates end-effector forces to joint torques through the principle of virtual work. If the end-effector exerts a force $\mathbf{F}$ on the environment, the required joint torques $\boldsymbol{\tau}$ are given by the Jacobian transpose.
+
+$$
+\boldsymbol{\tau} = J^T(\mathbf{q}) \, \mathbf{F}
+$$
+
+This relationship is the dual of the velocity mapping. While velocity maps forward through $J$, force maps backward through $J^T$.
+
+<Card title="Force Mapping for Collaborative Safety" icon="warning">
+**ISO/TS 15066 Compliance:**
+
+Given a maximum allowable end-effector force $F_{\max} = 150$ N, the controller must ensure:
+
+$$\|J^{-T} \boldsymbol{\tau}\| \leq F_{\max}$$
+
+Or equivalently, limit joint torques such that the resulting end-effector force stays safe. Near singularities, small joint torques can produce large end-effector forces along certain directions, making force monitoring especially critical.
+</Card>
+
+:::note[Duality Between Velocity and Force]
+The velocity and force mappings are transposes of each other. A direction of high velocity capability (large singular value) corresponds to a direction of low force capability, and vice versa. This is the robotic equivalent of the mechanical advantage principle: you cannot have both high speed and high force in the same direction.
+:::
+
+### Python Code: Jacobian Computation and Velocity Mapping
+
+```python
+import numpy as np
+
+def jacobian_2r(theta1, theta2, L1, L2):
+    """
+    Compute the Jacobian matrix for a 2R planar robot.
+
+    Parameters:
+        theta1, theta2 : joint angles in radians
+        L1, L2         : link lengths in meters
+
+    Returns:
+        J : 2x2 Jacobian matrix
+    """
+    s1 = np.sin(theta1)
+    c1 = np.cos(theta1)
+    s12 = np.sin(theta1 + theta2)
+    c12 = np.cos(theta1 + theta2)
+
+    J = np.array([
+        [-L1*s1 - L2*s12,  -L2*s12],
+        [ L1*c1 + L2*c12,   L2*c12]
+    ])
+    return J
+
+def forward_velocity(J, dq):
+    """
+    Forward velocity mapping: joint velocities -> end-effector velocity.
+
+    Parameters:
+        J  : Jacobian matrix (m x n)
+        dq : joint velocity vector (n,)
+
+    Returns:
+        dx : end-effector velocity vector (m,)
+    """
+    return J @ dq
+
+def inverse_velocity(J, dx):
+    """
+    Inverse velocity mapping: end-effector velocity -> joint velocities.
+    Uses direct inverse for square Jacobian, pseudoinverse otherwise.
+
+    Parameters:
+        J  : Jacobian matrix (m x n)
+        dx : desired end-effector velocity (m,)
+
+    Returns:
+        dq : required joint velocities (n,)
+    """
+    if J.shape[0] == J.shape[1]:
+        # Square Jacobian: use direct inverse
+        det_J = np.linalg.det(J)
+        if abs(det_J) < 1e-6:
+            print(f"WARNING: Near singularity! det(J) = {det_J:.6f}")
+            # Use damped least squares instead
+            lam = 0.01  # damping factor
+            dq = J.T @ np.linalg.solve(J @ J.T + lam**2 * np.eye(J.shape[0]), dx)
+            return dq
+        return np.linalg.solve(J, dx)
+    else:
+        # Redundant robot: use pseudoinverse (minimum-norm solution)
+        return np.linalg.pinv(J) @ dx
+
+# ---- Numerical example from the lesson ----
+L1, L2 = 1.0, 0.8  # link lengths (m)
+theta1 = np.radians(45)
+theta2 = np.radians(30)
+dq = np.array([2.0, -1.0])  # joint velocities (rad/s)
+
+# Compute Jacobian
+J = jacobian_2r(theta1, theta2, L1, L2)
+print("Jacobian matrix:")
+print(np.round(J, 4))
+
+# Forward velocity mapping
+dx = forward_velocity(J, dq)
+print(f"\nEnd-effector velocity: dx = {dx[0]:.3f} m/s, dy = {dx[1]:.3f} m/s")
+print(f"End-effector speed: {np.linalg.norm(dx):.3f} m/s")
+
+# Determinant (singularity measure)
+det_J = np.linalg.det(J)
+print(f"\ndet(J) = {det_J:.4f}")
+print(f"Analytical check: L1*L2*sin(theta2) = {L1*L2*np.sin(theta2):.4f}")
+
+# Inverse velocity: desired horizontal motion
+dx_desired = np.array([0.5, 0.0])
+dq_required = inverse_velocity(J, dx_desired)
+print(f"\nFor dx = {dx_desired}:")
+print(f"Required joint velocities: dq1 = {dq_required[0]:.3f} rad/s, "
+      f"dq2 = {dq_required[1]:.3f} rad/s")
+
+# Verify by forward mapping
+dx_check = forward_velocity(J, dq_required)
+print(f"Verification: dx = {dx_check[0]:.3f}, dy = {dx_check[1]:.3f}")
+```
+
+### Python Code: Singularity Detection Across Configurations
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def singularity_map(L1, L2, resolution=200):
+    """
+    Compute and visualize the singularity measure (determinant of J)
+    across the entire joint space for a 2R robot.
+
+    Parameters:
+        L1, L2     : link lengths
+        resolution : grid resolution for joint angles
+    """
+    theta1_range = np.linspace(-np.pi, np.pi, resolution)
+    theta2_range = np.linspace(-np.pi, np.pi, resolution)
+    T1, T2 = np.meshgrid(theta1_range, theta2_range)
+
+    # Vectorized determinant computation: det(J) = L1 * L2 * sin(theta2)
+    # Note: det(J) depends only on theta2 for the 2R robot
+    det_J = L1 * L2 * np.sin(T2)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Heatmap of determinant magnitude
+    ax1 = axes[0]
+    c1 = ax1.contourf(np.degrees(T1), np.degrees(T2), np.abs(det_J),
+                       levels=50, cmap='viridis')
+    ax1.contour(np.degrees(T1), np.degrees(T2), np.abs(det_J),
+                levels=[0.01], colors='red', linewidths=2)
+    plt.colorbar(c1, ax=ax1, label='|det(J)|')
+    ax1.set_xlabel('theta1 (degrees)')
+    ax1.set_ylabel('theta2 (degrees)')
+    ax1.set_title('Jacobian Determinant Magnitude')
+    ax1.axhline(y=0, color='r', linestyle='--', alpha=0.7, label='Singularity: theta2=0')
+    ax1.axhline(y=180, color='r', linestyle='--', alpha=0.7, label='Singularity: theta2=180')
+    ax1.axhline(y=-180, color='r', linestyle='--', alpha=0.7)
+    ax1.legend(fontsize=8)
+
+    # Cross-section at theta1 = 45 degrees
+    ax2 = axes[1]
+    det_cross = L1 * L2 * np.sin(theta2_range)
+    ax2.plot(np.degrees(theta2_range), det_cross, 'b-', linewidth=2)
+    ax2.axhline(y=0, color='r', linestyle='--', alpha=0.7)
+    ax2.fill_between(np.degrees(theta2_range), det_cross, 0,
+                     where=(np.abs(det_cross) < 0.05),
+                     color='red', alpha=0.3, label='Near-singular zone')
+    ax2.set_xlabel('theta2 (degrees)')
+    ax2.set_ylabel('det(J)')
+    ax2.set_title(f'det(J) vs theta2 (L1={L1}, L2={L2})')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig('singularity_map_2r.png', dpi=150, bbox_inches='tight')
+    plt.show()
+
+    print(f"Singularity lines: theta2 = 0 deg (fully extended, reach = {L1+L2})")
+    print(f"                   theta2 = 180 deg (fully folded, reach = {abs(L1-L2)})")
+    print(f"Maximum |det(J)| = {L1*L2:.3f} (at theta2 = +/-90 deg)")
+
+# Generate singularity map
+singularity_map(L1=1.0, L2=0.8)
+```
+
+### Python Code: Manipulability Ellipsoid Visualization
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+
+def jacobian_2r(theta1, theta2, L1, L2):
+    """Compute Jacobian for 2R robot."""
+    s1, c1 = np.sin(theta1), np.cos(theta1)
+    s12, c12 = np.sin(theta1 + theta2), np.cos(theta1 + theta2)
+    return np.array([
+        [-L1*s1 - L2*s12, -L2*s12],
+        [ L1*c1 + L2*c12,  L2*c12]
+    ])
+
+def fk_2r(theta1, theta2, L1, L2):
+    """Forward kinematics: returns end-effector position."""
+    x = L1*np.cos(theta1) + L2*np.cos(theta1 + theta2)
+    y = L1*np.sin(theta1) + L2*np.sin(theta1 + theta2)
+    return x, y
+
+def plot_manipulability(L1, L2, configurations, scale=0.3):
+    """
+    Visualize the robot arm and its manipulability ellipsoid
+    for several configurations.
+
+    Parameters:
+        L1, L2          : link lengths
+        configurations  : list of (theta1, theta2) tuples in degrees
+        scale           : scaling factor for ellipsoid display
+    """
+    n_configs = len(configurations)
+    fig, axes = plt.subplots(1, n_configs, figsize=(5*n_configs, 5))
+    if n_configs == 1:
+        axes = [axes]
+
+    for ax, (t1_deg, t2_deg) in zip(axes, configurations):
+        t1 = np.radians(t1_deg)
+        t2 = np.radians(t2_deg)
+
+        # Joint positions for drawing the arm
+        x0, y0 = 0, 0
+        x1 = L1 * np.cos(t1)
+        y1 = L1 * np.sin(t1)
+        x2, y2 = fk_2r(t1, t2, L1, L2)
+
+        # Draw the robot arm
+        ax.plot([x0, x1, x2], [y0, y1, y2], 'ko-', linewidth=3,
+                markersize=8, markerfacecolor='steelblue')
+        ax.plot(x0, y0, 'ks', markersize=12)  # base
+
+        # Compute Jacobian and SVD
+        J = jacobian_2r(t1, t2, L1, L2)
+        U, sigma, Vt = np.linalg.svd(J)
+
+        # Compute ellipsoid parameters
+        angle = np.degrees(np.arctan2(U[1, 0], U[0, 0]))
+        width = 2 * scale * sigma[0]
+        height = 2 * scale * sigma[1]
+
+        # Draw the manipulability ellipsoid at end-effector
+        ellipse = Ellipse(xy=(x2, y2), width=width, height=height,
+                          angle=angle, alpha=0.3, facecolor='coral',
+                          linewidth=2, edgecolor='red')
+        ax.add_patch(ellipse)
+
+        # Draw principal directions
+        for i in range(2):
+            direction = U[:, i] * sigma[i] * scale
+            ax.arrow(x2, y2, direction[0], direction[1],
+                    head_width=0.03, head_length=0.02,
+                    fc='red' if i == 0 else 'blue',
+                    ec='red' if i == 0 else 'blue', linewidth=1.5)
+
+        # Draw workspace boundary
+        theta_circle = np.linspace(0, 2*np.pi, 100)
+        ax.plot((L1+L2)*np.cos(theta_circle), (L1+L2)*np.sin(theta_circle),
+                'g--', alpha=0.3, linewidth=1)
+        if L1 != L2:
+            ax.plot(abs(L1-L2)*np.cos(theta_circle),
+                    abs(L1-L2)*np.sin(theta_circle),
+                    'g--', alpha=0.3, linewidth=1)
+
+        # Annotations
+        det_J = np.linalg.det(J)
+        w = sigma[0] * sigma[1]  # manipulability index
+        kappa = sigma[0] / max(sigma[1], 1e-10)  # condition number
+
+        ax.set_title(f'theta1={t1_deg}, theta2={t2_deg}\n'
+                     f'w={w:.3f}, kappa={kappa:.2f}, det={det_J:.3f}',
+                     fontsize=10)
+        ax.set_xlim(-2.2, 2.2)
+        ax.set_ylim(-2.2, 2.2)
+        ax.set_aspect('equal')
+        ax.grid(True, alpha=0.3)
+
+    plt.suptitle('Manipulability Ellipsoids for 2R Robot (L1=1.0, L2=0.8)',
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig('manipulability_ellipsoids.png', dpi=150, bbox_inches='tight')
+    plt.show()
+
+# Compare several configurations
+L1, L2 = 1.0, 0.8
+configs = [
+    (30, 90),    # good dexterity
+    (45, 30),    # moderate dexterity
+    (60, 10),    # near singularity (theta2 close to 0)
+    (0, 170),    # near singularity (theta2 close to 180)
+]
+plot_manipulability(L1, L2, configs, scale=0.3)
+```
+
+### Python Code: Straight-Line Motion Using the Jacobian
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def jacobian_2r(theta1, theta2, L1, L2):
+    """Compute Jacobian for 2R robot."""
+    s1, c1 = np.sin(theta1), np.cos(theta1)
+    s12, c12 = np.sin(theta1 + theta2), np.cos(theta1 + theta2)
+    return np.array([
+        [-L1*s1 - L2*s12, -L2*s12],
+        [ L1*c1 + L2*c12,  L2*c12]
+    ])
+
+def fk_2r(theta1, theta2, L1, L2):
+    """Forward kinematics for 2R robot."""
+    x = L1*np.cos(theta1) + L2*np.cos(theta1 + theta2)
+    y = L1*np.sin(theta1) + L2*np.sin(theta1 + theta2)
+    return np.array([x, y])
+
+def straight_line_trajectory(L1, L2, q_start, p_start, p_end,
+                              duration=2.0, dt=0.01):
+    """
+    Generate joint trajectories for straight-line end-effector motion
+    using resolved-rate (Jacobian inverse) control.
+
+    Parameters:
+        L1, L2   : link lengths
+        q_start  : initial joint angles [theta1, theta2] in radians
+        p_start  : start position [x, y]
+        p_end    : end position [x, y]
+        duration : motion time in seconds
+        dt       : time step in seconds
+
+    Returns:
+        t_hist, q_hist, p_hist, det_hist : time-series data
+    """
+    n_steps = int(duration / dt)
+    t_hist = np.zeros(n_steps)
+    q_hist = np.zeros((n_steps, 2))
+    p_hist = np.zeros((n_steps, 2))
+    det_hist = np.zeros(n_steps)
+
+    q = q_start.copy()
+
+    for i in range(n_steps):
+        t = i * dt
+        t_hist[i] = t
+        q_hist[i] = q
+
+        # Current end-effector position
+        p_current = fk_2r(q[0], q[1], L1, L2)
+        p_hist[i] = p_current
+
+        # Desired end-effector velocity (linear interpolation)
+        # Use trapezoidal velocity profile for smooth motion
+        s = t / duration  # normalized time [0, 1]
+        if s < 0.2:
+            # Acceleration phase
+            v_scale = s / 0.2
+        elif s > 0.8:
+            # Deceleration phase
+            v_scale = (1.0 - s) / 0.2
+        else:
+            # Constant velocity phase
+            v_scale = 1.0
+
+        # Desired velocity direction and magnitude
+        direction = p_end - p_start
+        dist = np.linalg.norm(direction)
+        # Average speed adjusted for trapezoidal profile
+        v_avg = dist / duration
+        v_peak = v_avg / 0.8  # compensate for accel/decel phases
+        dx_desired = (direction / dist) * v_peak * v_scale
+
+        # Compute Jacobian
+        J = jacobian_2r(q[0], q[1], L1, L2)
+        det_J = np.linalg.det(J)
+        det_hist[i] = det_J
+
+        # Inverse velocity mapping with damped least-squares near singularity
+        if abs(det_J) < 0.05:
+            # Damped least-squares (Levenberg-Marquardt)
+            lam = 0.01
+            dq = J.T @ np.linalg.solve(J @ J.T + lam**2 * np.eye(2), dx_desired)
+        else:
+            dq = np.linalg.solve(J, dx_desired)
+
+        # Clamp joint velocities for safety
+        max_dq = 5.0  # rad/s limit
+        if np.max(np.abs(dq)) > max_dq:
+            dq = dq * max_dq / np.max(np.abs(dq))
+
+        # Integrate joint angles (Euler method)
+        q = q + dq * dt
+
+    return t_hist, q_hist, p_hist, det_hist
+
+# ---- Simulate straight-line motion ----
+L1, L2 = 1.0, 0.8
+
+# Start and end points
+p_start = np.array([1.2, 0.5])
+p_end = np.array([0.4, 1.0])
+
+# Compute initial joint angles using inverse kinematics (geometric)
+def ik_2r(x, y, L1, L2, elbow_up=True):
+    """Inverse kinematics for 2R planar robot."""
+    r2 = x**2 + y**2
+    cos_t2 = (r2 - L1**2 - L2**2) / (2 * L1 * L2)
+    cos_t2 = np.clip(cos_t2, -1, 1)
+    if elbow_up:
+        t2 = np.arctan2(np.sqrt(1 - cos_t2**2), cos_t2)
+    else:
+        t2 = np.arctan2(-np.sqrt(1 - cos_t2**2), cos_t2)
+    t1 = np.arctan2(y, x) - np.arctan2(L2*np.sin(t2), L1 + L2*np.cos(t2))
+    return np.array([t1, t2])
+
+q_start = ik_2r(p_start[0], p_start[1], L1, L2, elbow_up=True)
+
+# Run simulation
+t_hist, q_hist, p_hist, det_hist = straight_line_trajectory(
+    L1, L2, q_start, p_start, p_end, duration=2.0, dt=0.005
+)
+
+# ---- Plot results ----
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+# End-effector path
+ax = axes[0, 0]
+ax.plot(p_hist[:, 0], p_hist[:, 1], 'b-', linewidth=2, label='Actual path')
+ax.plot([p_start[0], p_end[0]], [p_start[1], p_end[1]], 'r--',
+        linewidth=1.5, label='Desired straight line')
+ax.plot(p_start[0], p_start[1], 'go', markersize=10, label='Start')
+ax.plot(p_end[0], p_end[1], 'rs', markersize=10, label='End')
+ax.set_xlabel('x (m)')
+ax.set_ylabel('y (m)')
+ax.set_title('End-Effector Path')
+ax.legend()
+ax.set_aspect('equal')
+ax.grid(True, alpha=0.3)
+
+# Joint angles over time
+ax = axes[0, 1]
+ax.plot(t_hist, np.degrees(q_hist[:, 0]), 'b-', label='theta1')
+ax.plot(t_hist, np.degrees(q_hist[:, 1]), 'r-', label='theta2')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Joint angle (degrees)')
+ax.set_title('Joint Angle Trajectories')
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+# Joint velocities (numerical differentiation)
+ax = axes[1, 0]
+dq1 = np.gradient(q_hist[:, 0], t_hist)
+dq2 = np.gradient(q_hist[:, 1], t_hist)
+ax.plot(t_hist, dq1, 'b-', label='d(theta1)/dt')
+ax.plot(t_hist, dq2, 'r-', label='d(theta2)/dt')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Joint velocity (rad/s)')
+ax.set_title('Joint Velocities')
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+# Jacobian determinant over time
+ax = axes[1, 1]
+ax.plot(t_hist, det_hist, 'g-', linewidth=2)
+ax.axhline(y=0.05, color='r', linestyle='--', alpha=0.7,
+           label='Singularity threshold')
+ax.axhline(y=-0.05, color='r', linestyle='--', alpha=0.7)
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('det(J)')
+ax.set_title('Singularity Measure During Motion')
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+plt.suptitle('Straight-Line Motion via Jacobian Inverse Kinematics',
+             fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.savefig('straight_line_jacobian.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Report tracking error
+desired_path = p_start + np.outer(t_hist / t_hist[-1], p_end - p_start)
+tracking_error = np.linalg.norm(p_hist - desired_path, axis=1)
+print(f"Maximum tracking error: {np.max(tracking_error)*1000:.2f} mm")
+print(f"Average tracking error: {np.mean(tracking_error)*1000:.2f} mm")
+print(f"Minimum |det(J)| during motion: {np.min(np.abs(det_hist)):.4f}")
+```
+
+## 🎯 System Application: Collaborative Robot Force Limiting
+
+<InArticleAd />
+
+
+Now let us apply everything we have learned to the original collaborative robot challenge. The robot must track a handoff trajectory while continuously monitoring that end-effector forces remain within the 150 N safety limit specified by ISO/TS 15066.
+
+### Force-Limited Trajectory Execution
+
+The control loop at each time step:
+
+<Steps>
+
+1. **Measure** the current joint angles $\mathbf{q}$ from encoders and joint torques $\boldsymbol{\tau}$ from torque sensors.
+
+2. **Compute the Jacobian** $J(\mathbf{q})$ for the current configuration.
+
+3. **Estimate end-effector force** using $\mathbf{F} = J^{-T} \boldsymbol{\tau}$. If $\|\mathbf{F}\| > F_{\max}$, reduce joint torques proportionally.
+
+4. **Check singularity proximity** via $|\det(J)|$. If below threshold, activate damped least-squares and reduce speed.
+
+5. **Compute desired joint velocities** via $\dot{\mathbf{q}} = J^{-1} \dot{\mathbf{x}}_{\text{desired}}$ (or pseudoinverse for redundant robots).
+
+6. **Clamp joint velocities** to respect actuator limits and safety speed constraints.
+
+7. **Command** the clamped joint velocities to the motor controllers.
+
+</Steps>
+
+### Force Monitoring Example
+
+For our 2R robot at the numerical example configuration ($\theta_1 = 45°$, $\theta_2 = 30°$), suppose the joint torques are $\tau_1 = 10$ Nm and $\tau_2 = 5$ Nm. The end-effector force is:
+
+$$
+\mathbf{F} = J^{-T} \boldsymbol{\tau} = (J^{-1})^T \boldsymbol{\tau}
+$$
+
+Using the Jacobian inverse computed earlier:
+
+$$
+J^{-1} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9141 & -1.4798 \end{bmatrix}
+$$
+
+$$
+(J^{-1})^T = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & -0.9141 \\ 0.7727 & -1.4798 \end{bmatrix}
+$$
+
+$$
+\mathbf{F} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & -0.9141 \\ 0.7727 & -1.4798 \end{bmatrix} \begin{bmatrix} 10 \\ 5 \end{bmatrix} = \begin{bmatrix} -6.25 \\ -0.14 \end{bmatrix} \text{ N}
+$$
+
+The force magnitude is $\|\mathbf{F}\| = 6.25$ N, well within the 150 N limit at this configuration.
+
+:::note[Near-Singularity Force Amplification]
+As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without bound. The same joint torques that produce 6.25 N at $\theta_2 = 30°$ could produce hundreds of Newtons near full extension. This is why singularity monitoring is a safety requirement, not just a performance optimization.
+:::
+
+## 🛠️ Design Guidelines
+
+<InArticleAd />
+
+
+<CardGrid>
+  <Card title="Jacobian Computation" icon="seti:gear">
+    **Practice:** Compute the Jacobian symbolically first, then implement numerically. Verify against finite-difference approximations during development.
+
+    **Frequency:** The Jacobian must be recomputed at every control cycle (typically 1 kHz for collaborative robots).
+  </Card>
+  <Card title="Singularity Management" icon="warning">
+    **Detection:** Monitor $|\det(J)|$ or the minimum singular value $\sigma_{\min}$.
+
+    **Response:** Use damped least-squares ($\lambda = 0.01$ to $0.1$) near singularities. Reduce speed. Never allow the robot to pass through a singularity at full speed.
+  </Card>
+  <Card title="Redundancy Exploitation" icon="puzzle">
+    **When available:** Use the null space for secondary objectives such as joint limit avoidance, singularity avoidance, or obstacle avoidance.
+
+    **Priority:** Primary task (end-effector motion) always takes precedence. Null-space motion must not interfere with the primary task.
+  </Card>
+  <Card title="Force Safety" icon="rocket">
+    **Mapping:** Use $\boldsymbol{\tau} = J^T \mathbf{F}$ to convert force limits into joint torque limits.
+
+    **Configuration-dependent:** Force limits on joint torques must be updated at every control cycle because the Jacobian changes with configuration.
+  </Card>
+</CardGrid>
+
+### Practical Checklist
+
+<Steps>
+
+1. **Derive the Jacobian analytically** for your specific robot geometry. Validate against numerical differentiation.
+
+2. **Map your workspace** for singularity locations. Mark these on the trajectory planner's obstacle map.
+
+3. **Set singularity thresholds** based on your application's speed and force requirements.
+
+4. **Implement damped least-squares** as a fallback for near-singular configurations.
+
+5. **Test force mapping** at multiple configurations, especially near workspace boundaries.
+
+6. **For redundant robots,** implement null-space optimization with appropriate secondary objectives.
+
+</Steps>
+
+:::tip[Industry Best Practice]
+"Design trajectories that stay well inside the workspace, where manipulability is high and force control is predictable." Planning paths that skirt workspace boundaries or pass near singularities saves reach but costs controllability and safety margin.
+:::
+
+## 📋 Summary
+
+<InArticleAd />
+
+
+### Key Concepts Covered
+
+1. **The Jacobian matrix** maps joint velocities to end-effector velocities through $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$
+2. **Forward velocity mapping** is always straightforward (matrix multiplication)
+3. **Inverse velocity mapping** requires $J^{-1}$ (square) or $J^{\dagger}$ (redundant) and fails at singularities
+4. **Singularities** occur when $\det(J) = 0$; for the 2R robot, this means $\sin\theta_2 = 0$
+5. **Manipulability ellipsoids** (from SVD) visualize directional velocity capability
+6. **Pseudoinverse** gives the minimum-norm solution for redundant robots, with null-space freedom for secondary objectives
+7. **Force mapping** uses $J^T$ and is the dual of velocity mapping
+8. **Collaborative safety** requires continuous Jacobian-based force monitoring, especially near singularities
+
+### What Comes Next
+
+In Lesson 5, we will build on the Jacobian to plan smooth trajectories in both joint space and task space, using polynomial interpolation and velocity profiles to execute pick-and-place operations with the collaborative robot.
+
+
+
+<InArticleAd />
+<RoboticsComments />
+<TawkWidget />
+<Copyright />

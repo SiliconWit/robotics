@@ -1,0 +1,80 @@
+---
+title: Robotics
+description: Learn robotics from robot arm geometry to trajectory planning. Covers forward/inverse kinematics, quaternions, Jacobian analysis, and Python simulation.
+heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-mechanics-course.jpg"
+---
+
+import Copyright from '../../../../components/Copyright.astro';
+import TawkWidget from '../../../../components/TawkWidget.astro';
+import { Card, CardGrid, Badge } from '@astrojs/starlight/components';
+import { Steps } from '@astrojs/starlight/components';
+
+**Robotics**, also called **Robot Kinematics**, **Robot Mechanics**, or **Robotic Manipulation**, is the engineering discipline that connects spatial mathematics to physical robot systems. Building on foundations in transformation matrices, DH parameters, and rotation representations, this course focuses on making robots actually do useful work: reaching target positions, following smooth paths, and handling real-world tasks across industries.
+
+This course explores how robot arms are structured, how their joint motions translate to end-effector positions and orientations, and how to plan trajectories that are both physically feasible and practically efficient. Each lesson pairs rigorous theory with Python simulation so you can visualize and verify every concept.
+
+## Lesson Structure & Approach
+
+Each lesson follows our systems-based pedagogical approach:
+
+<Steps>
+1. **🔧 Real-World System Problem**
+   Begin with a concrete robotic system (pick-and-place arm, surgical robot, delta manipulator) facing a specific motion or control challenge.
+
+2. **📚 Fundamental Theory**
+   Develop the kinematic and mathematical principles needed to analyze and solve the robot motion problem.
+
+3. **🎯 System Application**
+   Apply theory to the original system with step-by-step solutions, Python code, and simulation verification.
+
+4. **🛠️ Design Guidelines**
+   Extract practical rules and best practices for professional robotic system design.
+</Steps>
+
+## Learning Path
+
+<Steps>
+1. **Understand Robot Structure**
+   Learn how link lengths, joint types, and workspace geometry define what a robot can physically do.
+
+2. **Solve Position Problems**
+   Use forward and inverse kinematics to map between joint angles and end-effector poses.
+
+3. **Handle Orientation Properly**
+   Apply quaternions and SLERP interpolation to avoid gimbal lock and achieve smooth rotational motion.
+
+4. **Analyze Velocities and Singularities**
+   Use the Jacobian to relate joint velocities to task-space velocities, and detect configurations where control breaks down.
+
+5. **Plan and Execute Trajectories**
+   Generate smooth, time-optimal paths in joint space and task space for real pick-and-place operations.
+
+6. **Simulate and Apply**
+   Build Python simulations and connect theory to real-world applications in manufacturing, logistics, medicine, and agriculture.
+</Steps>
+
+## Course Structure
+
+<Steps>
+1. **[Robot Arm Geometry and Configuration](./robot-arm-geometry-configuration)**
+   Study link design, joint types, and workspace analysis through common robot configurations including SCARA, articulated, and delta architectures.
+
+2. **[Forward and Inverse Kinematics](./forward-inverse-kinematics)**
+   Derive FK equations, solve geometric and numerical IK problems, handle multiple solutions, and map workspace boundaries.
+
+3. **[Orientation and Quaternions](./orientation-quaternions)**
+   Explore Euler angles and their gimbal lock limitation, then learn quaternion math, SLERP interpolation, and rotation composition for robust orientation control.
+
+4. **[Velocity Kinematics and the Jacobian](./velocity-kinematics-jacobian)**
+   Derive the Jacobian matrix, perform forward and inverse velocity mapping, detect singularities, and interpret manipulability ellipsoids.
+
+5. **[Trajectory Planning and Motion Control](./trajectory-planning-motion-control)**
+   Compare joint-space and task-space trajectories, implement polynomial interpolation and velocity profiles, and sequence pick-and-place operations.
+
+6. **[Robot Simulation and Practical Applications](./robot-simulation-applications)**
+   Build Python simulations with visualization techniques and connect to real-world applications across manufacturing, logistics, medical, and agricultural domains.
+</Steps>
+
+<Copyright />
+
+<TawkWidget />

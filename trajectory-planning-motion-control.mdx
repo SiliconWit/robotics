@@ -1,0 +1,930 @@
+---
+title: "Lesson 5: Trajectory Planning and Motion Control"
+description: "Plan smooth robot trajectories using polynomial interpolation, splines, and velocity profiles for pick-and-place and path following tasks"
+contributors: "sam-macharia"
+pubDate: 2026-03-10
+tags: ["robotics", "trajectory-planning", "motion-control", "pick-and-place", "polynomial-interpolation", "spline", "velocity-profile", "path-planning"]
+excerpt: "Learn trajectory planning through warehouse mobile manipulator pick-and-place operations. Cover joint-space and task-space planning, polynomial and spline interpolation, trapezoidal velocity profiles, and complete pick-and-place task sequencing."
+heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+---
+
+import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
+import TawkWidget from '../../../../components/TawkWidget.astro';
+import UniversalContentContributors from '../../../../components/UniversalContentContributors.astro';
+import InArticleAd from '../../../../components/InArticleAd.astro';
+import Copyright from '../../../../components/Copyright.astro';
+import BionicText from '../../../../components/BionicText.astro';
+import TailwindWrapper from '../../../../components/TailwindWrapper.jsx';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/starlight/components';
+
+<UniversalContentContributors 
+  contributors={frontmatter.contributors}
+/>
+
+
+
+Trajectory planning bridges the gap between knowing where a robot should go and actually getting it there smoothly. In this lesson, we design trajectories for a warehouse mobile manipulator performing pick-and-place operations, covering polynomial interpolation, spline paths through multiple waypoints, and trapezoidal velocity profiles that respect actuator limits. #TrajectoryPlanning #MotionControl #Robotics
+
+## Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+1. <Badge text="Compare" variant="tip" /> joint-space and task-space trajectory planning approaches and select the appropriate one for a given task
+2. <Badge text="Derive" variant="note" /> cubic and quintic polynomial trajectories with specified boundary conditions
+3. <Badge text="Implement" variant="tip" /> trapezoidal velocity profiles that respect actuator velocity and acceleration limits
+4. <Badge text="Construct" variant="caution" /> spline trajectories through multiple via points with continuous velocity and acceleration
+5. <Badge text="Sequence" variant="danger" /> a complete pick-and-place operation with approach, grasp, transport, place, and return phases
+
+## Real-World Engineering Challenge: Warehouse Mobile Manipulator Pick-and-Place
+
+<InArticleAd />
+
+
+A warehouse mobile manipulator must pick boxes from storage shelves and place them on a conveyor belt for shipping. The robot arm (a 6-DOF articulated manipulator mounted on a mobile base) needs to move between shelf locations and the conveyor with smooth, predictable motions. Jerky trajectories cause the gripper to drop boxes, damage products, and wear out actuators prematurely. The system must handle boxes at different shelf heights, plan paths that avoid shelf edges, and maintain a cycle time under 8 seconds per pick-and-place operation.
+
+:::note[Key Engineering Questions]
+1. How do we generate smooth joint motions that start and stop without sudden velocity jumps?
+2. Should the robot plan its path in joint space or Cartesian (task) space, and when does each approach make sense?
+3. How do we enforce maximum velocity and acceleration constraints imposed by the actuators?
+4. How do we sequence the full pick-and-place cycle (approach, descend, grasp, lift, transport, lower, release, return) with smooth transitions between phases?
+:::
+
+### Why Trajectory Smoothness Matters
+
+A trajectory that commands instantaneous velocity changes requires infinite acceleration, which no real motor can produce. The result is vibration, tracking error, and mechanical stress. Smooth trajectories (with continuous velocity, and ideally continuous acceleration) let the motor controllers track the commanded path accurately, reduce energy consumption, and extend the lifespan of gears and bearings. In a warehouse setting, a single dropped box can halt an entire packing line, so smoothness directly affects throughput and reliability.
+
+## Fundamental Theory
+
+<InArticleAd />
+
+
+### Joint-Space vs. Task-Space Trajectory Planning
+
+There are two fundamental approaches to planning a robot trajectory. Joint-space planning interpolates directly between joint angle vectors, while task-space planning interpolates the end-effector pose (position and orientation) in Cartesian coordinates. Each approach has distinct advantages and trade-offs.
+
+<Tabs>
+<TabItem label="Joint-Space Planning">
+
+**How it works:** Given start joint angles $\mathbf{q}_0$ and goal joint angles $\mathbf{q}_f$, interpolate each joint independently as a function of time $t$.
+
+**Advantages:**
+- Simple to implement: each joint follows its own polynomial or profile
+- No singularity issues during motion (the Jacobian is never needed)
+- Guaranteed to respect joint limits if start and goal are within limits
+- Computationally inexpensive
+
+**Disadvantages:**
+- The end-effector path in Cartesian space is generally curved and unpredictable
+- Cannot guarantee straight-line motion of the tool tip
+- Not suitable when the Cartesian path matters (e.g., welding a seam, avoiding obstacles)
+
+**Best for:** Point-to-point moves where only the start and end positions matter, such as moving between widely separated waypoints in a pick-and-place cycle.
+
+</TabItem>
+<TabItem label="Task-Space Planning">
+
+**How it works:** Given start pose $\mathbf{x}_0$ and goal pose $\mathbf{x}_f$ in Cartesian space, interpolate position (and orientation using quaternion SLERP from Lesson 3), then solve inverse kinematics at each time step.
+
+**Advantages:**
+- Full control over the Cartesian path (straight lines, arcs, or any desired shape)
+- Essential for tasks where the path matters (painting, welding, deburring)
+- Easier to specify obstacle avoidance constraints
+
+**Disadvantages:**
+- Requires solving inverse kinematics at every time step (computationally expensive)
+- May encounter singularities during the motion
+- Joint velocities can become very large near singular configurations
+- No guarantee that joint limits are respected along the path
+
+**Best for:** Motions where the Cartesian path is critical, such as descending vertically onto a box or following a shelf edge.
+
+</TabItem>
+</Tabs>
+
+:::note[Practical Approach]
+Most industrial pick-and-place systems use a hybrid strategy. Joint-space planning handles large free-space motions (moving between shelf and conveyor), while task-space planning handles the critical approach and departure segments (vertical descent onto a box, straight-line lift after grasping).
+:::
+
+### Linear Interpolation: The Simplest Trajectory
+
+The simplest trajectory linearly interpolates between start and goal:
+
+$$
+q(t) = q_0 + \frac{q_f - q_0}{t_f} \cdot t, \quad 0 \leq t \leq t_f
+$$
+
+The velocity is constant:
+
+$$
+\dot{q}(t) = \frac{q_f - q_0}{t_f}
+$$
+
+The problem: velocity jumps from zero to a constant value at $t=0$ and back to zero at $t=t_f$. These discontinuities require infinite acceleration, which is physically impossible. Linear interpolation is useful only as a building block inside more sophisticated methods (like trapezoidal profiles).
+
+### Cubic Polynomial Interpolation
+
+A cubic polynomial provides the minimum-degree trajectory that can satisfy four boundary conditions: position and velocity at both the start and end of the motion. This gives us smooth velocity transitions with zero velocity at the endpoints, which is exactly what we need for a robot that starts and stops at rest.
+
+The cubic polynomial trajectory is:
+
+$$
+q(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3
+$$
+
+with velocity and acceleration:
+
+$$
+\dot{q}(t) = a_1 + 2a_2 t + 3a_3 t^2
+$$
+
+$$
+\ddot{q}(t) = 2a_2 + 6a_3 t
+$$
+
+#### Boundary Conditions
+
+For a rest-to-rest motion from $q_0$ to $q_f$ over time $t_f$:
+
+$$
+q(0) = q_0, \quad q(t_f) = q_f, \quad \dot{q}(0) = 0, \quad \dot{q}(t_f) = 0
+$$
+
+#### Coefficient Derivation
+
+Applying the boundary conditions:
+
+From $q(0) = q_0$:
+
+$$a_0 = q_0$$
+
+From $\dot{q}(0) = 0$:
+
+$$a_1 = 0$$
+
+From $q(t_f) = q_f$ and $\dot{q}(t_f) = 0$, solving the system:
+
+$$
+a_2 = \frac{3(q_f - q_0)}{t_f^2}
+$$
+
+$$
+a_3 = \frac{-2(q_f - q_0)}{t_f^3}
+$$
+
+<details>
+<summary>Full derivation of the coefficient system</summary>
+
+Starting from the four equations:
+
+$$
+a_0 = q_0
+$$
+
+$$
+a_1 = 0
+$$
+
+$$
+a_0 + a_1 t_f + a_2 t_f^2 + a_3 t_f^3 = q_f
+$$
+
+$$
+a_1 + 2 a_2 t_f + 3 a_3 t_f^2 = 0
+$$
+
+Substituting $a_0 = q_0$ and $a_1 = 0$ into the last two equations:
+
+$$
+q_0 + a_2 t_f^2 + a_3 t_f^3 = q_f
+$$
+
+$$
+2 a_2 t_f + 3 a_3 t_f^2 = 0
+$$
+
+From the velocity equation: $a_2 = -\frac{3}{2} a_3 t_f$
+
+Substituting into the position equation:
+
+$$
+q_0 - \frac{3}{2} a_3 t_f^3 + a_3 t_f^3 = q_f
+$$
+
+$$
+-\frac{1}{2} a_3 t_f^3 = q_f - q_0
+$$
+
+$$
+a_3 = \frac{-2(q_f - q_0)}{t_f^3}
+$$
+
+And therefore:
+
+$$
+a_2 = -\frac{3}{2} \cdot \frac{-2(q_f - q_0)}{t_f^3} \cdot t_f = \frac{3(q_f - q_0)}{t_f^2}
+$$
+
+</details>
+
+### Quintic Polynomial: Acceleration Continuity
+
+A quintic (5th-degree) polynomial provides six boundary conditions: position, velocity, and acceleration at both endpoints. This ensures the acceleration profile is also smooth at the start and end of the motion, which reduces jerk (the derivative of acceleration) and produces even gentler motion.
+
+$$
+q(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5
+$$
+
+For rest-to-rest motion with zero acceleration at endpoints ($q(0) = q_0$, $q(t_f) = q_f$, $\dot{q}(0) = \dot{q}(t_f) = 0$, $\ddot{q}(0) = \ddot{q}(t_f) = 0$):
+
+$$
+a_0 = q_0, \quad a_1 = 0, \quad a_2 = 0
+$$
+
+$$
+a_3 = \frac{10(q_f - q_0)}{t_f^3}, \quad a_4 = \frac{-15(q_f - q_0)}{t_f^4}, \quad a_5 = \frac{6(q_f - q_0)}{t_f^5}
+$$
+
+:::note[When to use quintic over cubic]
+Use cubic polynomials when computational speed matters and moderate smoothness is acceptable. Use quintic polynomials when acceleration continuity is important, such as when the robot carries delicate payloads or when you need to chain multiple trajectory segments together without acceleration jumps at the boundaries.
+:::
+
+### Trapezoidal Velocity Profile
+
+In industrial applications, actuators have hard limits on maximum velocity and maximum acceleration. The trapezoidal velocity profile is the time-optimal trajectory under these constraints. It consists of three phases: constant acceleration, constant velocity (cruise), and constant deceleration. The velocity profile looks like a trapezoid when plotted against time.
+
+Given maximum velocity $v_{max}$ and maximum acceleration $a_{max}$, the motion from $q_0$ to $q_f$ (with $\Delta q = q_f - q_0 > 0$) has:
+
+**Phase 1: Acceleration** ($0 \leq t \leq t_a$)
+
+$$
+q(t) = q_0 + \frac{1}{2} a_{max} t^2, \quad \dot{q}(t) = a_{max} \cdot t
+$$
+
+**Phase 2: Cruise** ($t_a \leq t \leq t_a + t_c$)
+
+$$
+q(t) = q_0 + v_{max}\left(t - \frac{t_a}{2}\right), \quad \dot{q}(t) = v_{max}
+$$
+
+**Phase 3: Deceleration** ($t_a + t_c \leq t \leq t_f$)
+
+$$
+\dot{q}(t) = v_{max} - a_{max}(t - t_a - t_c)
+$$
+
+The timing parameters:
+
+$$
+t_a = \frac{v_{max}}{a_{max}}, \quad t_c = \frac{\Delta q}{v_{max}} - \frac{v_{max}}{a_{max}}, \quad t_f = 2t_a + t_c
+$$
+
+:::caution[Triangular Profile Case]
+If the required distance $\Delta q$ is too short to reach $v_{max}$ before deceleration must begin, the cruise phase vanishes ($t_c = 0$) and the profile becomes triangular. This occurs when $\Delta q < \frac{v_{max}^2}{a_{max}}$. In this case, the peak velocity reached is $v_{peak} = \sqrt{a_{max} \cdot \Delta q}$ and the total time is $t_f = 2\sqrt{\frac{\Delta q}{a_{max}}}$.
+:::
+
+### Spline Interpolation Through Multiple Waypoints
+
+When a trajectory must pass through multiple via points (for example, a sequence of shelf locations), we connect consecutive pairs with cubic polynomials and enforce continuity of position, velocity, and acceleration at each via point. This produces a cubic spline trajectory.
+
+For $n+1$ waypoints $q_0, q_1, \ldots, q_n$ at times $t_0, t_1, \ldots, t_n$, we construct $n$ cubic segments. At each interior waypoint $k$, we require:
+
+1. **Position continuity:** The segment ending at $q_k$ and the segment starting at $q_k$ agree on the position value.
+2. **Velocity continuity:** $\dot{q}_{k}^{-} = \dot{q}_{k}^{+}$ (velocity from the left equals velocity from the right).
+3. **Acceleration continuity:** $\ddot{q}_{k}^{-} = \ddot{q}_{k}^{+}$ (acceleration matches across the boundary).
+
+With boundary conditions $\dot{q}(t_0) = 0$ and $\dot{q}(t_n) = 0$ (natural spline with rest at endpoints), this forms a tridiagonal linear system that can be solved efficiently.
+
+<details>
+<summary>Via-point velocity estimation</summary>
+
+When time-stamps are given but intermediate velocities are not specified, a common heuristic is to set the velocity at each interior via point to the average of the linear velocities on either side:
+
+$$
+\dot{q}_k = \frac{1}{2}\left(\frac{q_k - q_{k-1}}{t_k - t_{k-1}} + \frac{q_{k+1} - q_k}{t_{k+1} - t_k}\right)
+$$
+
+If the two adjacent segments have opposite signs (the joint reverses direction), the via-point velocity is set to zero.
+
+</details>
+
+### Pick-and-Place Task Phases
+
+A complete pick-and-place operation is a sequence of trajectory segments, each designed for a specific purpose. The segments are connected end-to-end with matching positions and velocities at the transition points. Here is the full phase breakdown for our warehouse manipulator.
+
+<Steps>
+1. **Move to approach position**
+   Joint-space cubic polynomial from the home configuration to a position above the target box. This is a large free-space motion where the Cartesian path does not matter.
+
+2. **Descend to object**
+   Task-space straight-line descent (vertical) from the approach position to the grasp position. This uses Cartesian trajectory planning with IK at each step to ensure the gripper approaches the box from directly above.
+
+3. **Grasp**
+   Close the gripper. The arm holds position while the gripper actuates. Typical dwell time: 200-500 ms.
+
+4. **Lift**
+   Task-space straight-line vertical lift to a safe clearance height above the shelf. This prevents the box from clipping the shelf edge.
+
+5. **Transport**
+   Joint-space trajectory from the lifted position above the shelf to a position above the conveyor. This is the longest segment and should use a trapezoidal velocity profile for time-optimal motion.
+
+6. **Lower to placement**
+   Task-space straight-line descent to the conveyor placement position.
+
+7. **Release**
+   Open the gripper. Dwell time: 200-500 ms.
+
+8. **Return home**
+   Joint-space trajectory back to the home configuration, ready for the next cycle.
+</Steps>
+
+### Via Points and Blending
+
+In practice, stopping at every via point (zero velocity) wastes time. Via-point blending replaces the stop-and-go transitions with smooth curves that pass near (but not exactly through) the via points. The robot trades a small amount of path accuracy for significant cycle time improvement.
+
+A common blending approach defines a blend radius $r$ around each via point. Within the blend region, a parabolic (or circular) curve replaces the linear segment. Outside the blend regions, the robot follows the original straight-line segments at cruise velocity. The blend radius is chosen as a trade-off between path accuracy and transition smoothness.
+
+### Cartesian Straight-Line Motion
+
+For task-space segments (descent, lift, placement), we generate a straight line in Cartesian space and convert to joint trajectories using the Jacobian from Lesson 4.
+
+Given a desired Cartesian velocity $\dot{\mathbf{x}}$, the required joint velocities are:
+
+$$
+\dot{\mathbf{q}} = J(\mathbf{q})^{-1} \dot{\mathbf{x}}
+$$
+
+Or using the pseudoinverse for redundant robots:
+
+$$
+\dot{\mathbf{q}} = J^{\dagger}(\mathbf{q}) \dot{\mathbf{x}}
+$$
+
+The trajectory is generated by discretizing the Cartesian path into small steps and solving IK (or using the resolved-rate method above) at each step.
+
+### Python Implementation: Cubic Polynomial Trajectory
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def cubic_trajectory(q0, qf, tf, dt=0.01):
+    """Generate a cubic polynomial rest-to-rest trajectory.
+
+    Parameters
+    ----------
+    q0 : float
+        Start position (rad or m).
+    qf : float
+        End position (rad or m).
+    tf : float
+        Duration (s).
+    dt : float
+        Time step (s).
+
+    Returns
+    -------
+    t : ndarray
+        Time vector.
+    q : ndarray
+        Position profile.
+    qd : ndarray
+        Velocity profile.
+    qdd : ndarray
+        Acceleration profile.
+    """
+    # Compute coefficients
+    a0 = q0
+    a1 = 0.0
+    a2 = 3.0 * (qf - q0) / tf**2
+    a3 = -2.0 * (qf - q0) / tf**3
+
+    t = np.arange(0, tf + dt, dt)
+    q = a0 + a1 * t + a2 * t**2 + a3 * t**3
+    qd = a1 + 2 * a2 * t + 3 * a3 * t**2
+    qdd = 2 * a2 + 6 * a3 * t
+
+    return t, q, qd, qdd
+
+def quintic_trajectory(q0, qf, tf, dt=0.01):
+    """Generate a quintic polynomial rest-to-rest trajectory.
+
+    Parameters
+    ----------
+    q0, qf : float
+        Start and end positions.
+    tf : float
+        Duration (s).
+    dt : float
+        Time step (s).
+
+    Returns
+    -------
+    t, q, qd, qdd : ndarray
+        Time, position, velocity, acceleration.
+    """
+    a0 = q0
+    a1 = 0.0
+    a2 = 0.0
+    a3 = 10.0 * (qf - q0) / tf**3
+    a4 = -15.0 * (qf - q0) / tf**4
+    a5 = 6.0 * (qf - q0) / tf**5
+
+    t = np.arange(0, tf + dt, dt)
+    q = a0 + a1*t + a2*t**2 + a3*t**3 + a4*t**4 + a5*t**5
+    qd = a1 + 2*a2*t + 3*a3*t**2 + 4*a4*t**3 + 5*a5*t**4
+    qdd = 2*a2 + 6*a3*t + 12*a4*t**2 + 20*a5*t**3
+
+    return t, q, qd, qdd
+
+# === Example: Joint 1 moves from 0 to 90 degrees in 2 seconds ===
+q0 = 0.0
+qf = np.radians(90)
+tf = 2.0
+
+t_c, q_c, qd_c, qdd_c = cubic_trajectory(q0, qf, tf)
+t_q, q_q, qd_q, qdd_q = quintic_trajectory(q0, qf, tf)
+
+fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+
+# Position
+axes[0].plot(t_c, np.degrees(q_c), 'b-', label='Cubic', linewidth=2)
+axes[0].plot(t_q, np.degrees(q_q), 'r--', label='Quintic', linewidth=2)
+axes[0].set_ylabel('Position (deg)')
+axes[0].legend()
+axes[0].set_title('Cubic vs Quintic Polynomial Trajectory')
+axes[0].grid(True, alpha=0.3)
+
+# Velocity
+axes[1].plot(t_c, np.degrees(qd_c), 'b-', label='Cubic', linewidth=2)
+axes[1].plot(t_q, np.degrees(qd_q), 'r--', label='Quintic', linewidth=2)
+axes[1].set_ylabel('Velocity (deg/s)')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+# Acceleration
+axes[2].plot(t_c, np.degrees(qdd_c), 'b-', label='Cubic', linewidth=2)
+axes[2].plot(t_q, np.degrees(qdd_q), 'r--', label='Quintic', linewidth=2)
+axes[2].set_ylabel('Acceleration (deg/s²)')
+axes[2].set_xlabel('Time (s)')
+axes[2].legend()
+axes[2].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('cubic_vs_quintic_trajectory.png', dpi=150)
+plt.show()
+
+print(f"Cubic  - peak velocity: {np.degrees(max(qd_c)):.1f} deg/s")
+print(f"Quintic - peak velocity: {np.degrees(max(qd_q)):.1f} deg/s")
+print(f"Cubic  - peak accel: {np.degrees(max(abs(qdd_c))):.1f} deg/s²")
+print(f"Quintic - peak accel: {np.degrees(max(abs(qdd_q))):.1f} deg/s²")
+```
+
+:::note[Key Observation]
+The cubic polynomial has discontinuous acceleration at the start and end (nonzero jumps). The quintic polynomial starts and ends with zero acceleration, producing a smoother jerk profile. The trade-off is that the quintic has a slightly higher peak velocity and peak acceleration for the same motion duration.
+:::
+
+### Python Implementation: Trapezoidal Velocity Profile
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def trapezoidal_profile(q0, qf, v_max, a_max, dt=0.001):
+    """Generate a trapezoidal velocity profile trajectory.
+
+    Parameters
+    ----------
+    q0, qf : float
+        Start and end positions.
+    v_max : float
+        Maximum velocity.
+    a_max : float
+        Maximum acceleration (and deceleration).
+    dt : float
+        Time step (s).
+
+    Returns
+    -------
+    t, q, qd, qdd : ndarray
+        Time, position, velocity, acceleration arrays.
+    """
+    dq = qf - q0
+    sign = np.sign(dq)
+    dq = abs(dq)
+
+    # Check if we can reach v_max
+    if dq < v_max**2 / a_max:
+        # Triangular profile: cannot reach v_max
+        v_peak = np.sqrt(a_max * dq)
+        t_a = v_peak / a_max
+        t_c = 0.0
+        t_d = t_a
+    else:
+        # Trapezoidal profile
+        t_a = v_max / a_max
+        t_c = dq / v_max - v_max / a_max
+        t_d = t_a
+        v_peak = v_max
+
+    t_f = t_a + t_c + t_d
+    t = np.arange(0, t_f + dt, dt)
+
+    q = np.zeros_like(t)
+    qd = np.zeros_like(t)
+    qdd = np.zeros_like(t)
+
+    for i, ti in enumerate(t):
+        if ti <= t_a:
+            # Acceleration phase
+            qdd[i] = a_max
+            qd[i] = a_max * ti
+            q[i] = 0.5 * a_max * ti**2
+        elif ti <= t_a + t_c:
+            # Cruise phase
+            dt_cruise = ti - t_a
+            qdd[i] = 0.0
+            qd[i] = v_peak
+            q[i] = 0.5 * a_max * t_a**2 + v_peak * dt_cruise
+        else:
+            # Deceleration phase
+            dt_decel = ti - t_a - t_c
+            qdd[i] = -a_max
+            qd[i] = v_peak - a_max * dt_decel
+            q[i] = (0.5 * a_max * t_a**2
+                     + v_peak * t_c
+                     + v_peak * dt_decel
+                     - 0.5 * a_max * dt_decel**2)
+
+    # Apply direction and offset
+    q = q0 + sign * q
+    qd = sign * qd
+    qdd = sign * qdd
+
+    return t, q, qd, qdd
+
+# === Example: Joint moves 90 degrees with actuator limits ===
+q0 = 0.0
+qf = np.radians(90)
+v_max = np.radians(60)   # 60 deg/s max velocity
+a_max = np.radians(120)  # 120 deg/s² max acceleration
+
+t, q, qd, qdd = trapezoidal_profile(q0, qf, v_max, a_max)
+
+fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+
+axes[0].plot(t, np.degrees(q), 'b-', linewidth=2)
+axes[0].set_ylabel('Position (deg)')
+axes[0].set_title('Trapezoidal Velocity Profile Trajectory')
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(t, np.degrees(qd), 'g-', linewidth=2)
+axes[1].axhline(y=np.degrees(v_max), color='r', linestyle='--', alpha=0.5, label='v_max')
+axes[1].set_ylabel('Velocity (deg/s)')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+axes[2].plot(t, np.degrees(qdd), 'm-', linewidth=2)
+axes[2].axhline(y=np.degrees(a_max), color='r', linestyle='--', alpha=0.5, label='a_max')
+axes[2].axhline(y=-np.degrees(a_max), color='r', linestyle='--', alpha=0.5)
+axes[2].set_ylabel('Acceleration (deg/s²)')
+axes[2].set_xlabel('Time (s)')
+axes[2].legend()
+axes[2].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('trapezoidal_profile.png', dpi=150)
+plt.show()
+
+t_a_val = np.degrees(v_max) / np.degrees(a_max)
+print(f"Acceleration time: {t_a_val:.3f} s")
+print(f"Total time: {t[-1]:.3f} s")
+print(f"Peak velocity: {np.degrees(max(qd)):.1f} deg/s")
+```
+
+### Python Implementation: Complete Pick-and-Place Trajectory
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def cubic_trajectory(q0, qf, tf, dt=0.01):
+    """Cubic polynomial rest-to-rest trajectory."""
+    a0 = q0
+    a2 = 3.0 * (qf - q0) / tf**2
+    a3 = -2.0 * (qf - q0) / tf**3
+    t = np.arange(0, tf + dt, dt)
+    q = a0 + a2 * t**2 + a3 * t**3
+    qd = 2 * a2 * t + 3 * a3 * t**2
+    return t, q, qd
+
+def plan_pick_and_place():
+    """Plan a complete pick-and-place trajectory for a 3-joint planar arm.
+
+    Phases:
+    1. Home -> Approach (joint-space cubic)
+    2. Approach -> Grasp position (task-space vertical descent, simulated as joint-space)
+    3. Dwell for grasping
+    4. Grasp position -> Lift (vertical ascent)
+    5. Lift -> Above conveyor (joint-space cubic, transport)
+    6. Above conveyor -> Place position (vertical descent)
+    7. Dwell for release
+    8. Place position -> Home (joint-space cubic)
+    """
+
+    # Joint configurations (radians) for a 3-joint planar arm
+    # [shoulder, elbow, wrist]
+    q_home     = np.array([0.0, 0.0, 0.0])
+    q_approach = np.array([0.5, -0.8, 0.3])     # above the box on shelf
+    q_grasp    = np.array([0.6, -1.0, 0.4])     # at the box (descended)
+    q_lift     = np.array([0.5, -0.8, 0.3])     # lifted above shelf
+    q_above_cv = np.array([-0.4, -0.6, 0.2])    # above conveyor
+    q_place    = np.array([-0.35, -0.75, 0.25]) # at conveyor (descended)
+
+    # Phase durations (seconds)
+    t_move_to_approach = 1.5
+    t_descend = 0.6
+    t_grasp_dwell = 0.3
+    t_lift = 0.6
+    t_transport = 2.0
+    t_lower = 0.6
+    t_release_dwell = 0.3
+    t_return = 1.5
+
+    all_t = []
+    all_q = [[], [], []]  # one list per joint
+    all_labels = []
+    t_offset = 0.0
+
+    phases = [
+        ("Move to approach", q_home, q_approach, t_move_to_approach),
+        ("Descend", q_approach, q_grasp, t_descend),
+        ("Grasp (dwell)", q_grasp, q_grasp, t_grasp_dwell),
+        ("Lift", q_grasp, q_lift, t_lift),
+        ("Transport", q_lift, q_above_cv, t_transport),
+        ("Lower", q_above_cv, q_place, t_lower),
+        ("Release (dwell)", q_place, q_place, t_release_dwell),
+        ("Return home", q_place, q_home, t_return),
+    ]
+
+    for name, q_start, q_end, duration in phases:
+        for j in range(3):
+            t_seg, q_seg, _ = cubic_trajectory(q_start[j], q_end[j], duration)
+            if len(all_t) > 0 and j == 0:
+                # Offset time for this phase
+                pass
+            all_q[j].extend(q_seg + 0 if len(all_q[j]) == 0 else q_seg.tolist())
+
+        t_seg, _, _ = cubic_trajectory(0, 0, duration)
+        all_t.extend((t_seg + t_offset).tolist())
+        all_labels.append((t_offset, t_offset + duration, name))
+        t_offset += duration
+
+    # Rebuild cleanly
+    all_t = []
+    all_q = [[], [], []]
+    t_offset = 0.0
+
+    for name, q_start, q_end, duration in phases:
+        t_seg = np.arange(0, duration + 0.01, 0.01)
+        for j in range(3):
+            _, q_seg, _ = cubic_trajectory(q_start[j], q_end[j], duration)
+            all_q[j].extend(q_seg.tolist())
+        all_t.extend((t_seg + t_offset).tolist())
+        t_offset += duration
+
+    all_t = np.array(all_t)
+    all_q = [np.array(q) for q in all_q]
+
+    # Plot
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+    joint_names = ['Shoulder', 'Elbow', 'Wrist']
+    colors = ['#2196F3', '#FF5722', '#4CAF50']
+
+    for j in range(3):
+        axes[j].plot(all_t, np.degrees(all_q[j]), color=colors[j], linewidth=2)
+        axes[j].set_ylabel(f'{joint_names[j]} (deg)')
+        axes[j].grid(True, alpha=0.3)
+
+    # Add phase annotations
+    phase_colors = ['#E3F2FD', '#FFF3E0', '#FFEBEE', '#E8F5E9',
+                    '#F3E5F5', '#FFF3E0', '#FFEBEE', '#E3F2FD']
+    t_start = 0.0
+    for i, (name, _, _, duration) in enumerate(phases):
+        for j in range(3):
+            axes[j].axvspan(t_start, t_start + duration,
+                          alpha=0.15, color=phase_colors[i % len(phase_colors)])
+        axes[2].text(t_start + duration / 2, axes[2].get_ylim()[0] + 2,
+                    name, ha='center', va='bottom', fontsize=7, rotation=45)
+        t_start += duration
+
+    axes[0].set_title('Complete Pick-and-Place Joint Trajectories')
+    axes[2].set_xlabel('Time (s)')
+
+    plt.tight_layout()
+    plt.savefig('pick_and_place_trajectory.png', dpi=150)
+    plt.show()
+
+    total_time = sum(d for _, _, _, d in phases)
+    print(f"Total cycle time: {total_time:.1f} s")
+    print(f"\nPhase breakdown:")
+    for name, _, _, duration in phases:
+        print(f"  {name}: {duration:.1f} s")
+
+plan_pick_and_place()
+```
+
+### Python Implementation: Interpolation Method Comparison
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+def linear_interp(q0, qf, tf, dt=0.01):
+    """Linear interpolation (discontinuous velocity)."""
+    t = np.arange(0, tf + dt, dt)
+    q = q0 + (qf - q0) * t / tf
+    qd = np.full_like(t, (qf - q0) / tf)
+    qdd = np.zeros_like(t)
+    # Mark discontinuities at endpoints
+    qdd[0] = float('inf')
+    qdd[-1] = float('inf')
+    return t, q, qd, qdd
+
+def cubic_interp(q0, qf, tf, dt=0.01):
+    """Cubic polynomial (continuous velocity, discontinuous acceleration)."""
+    a2 = 3.0 * (qf - q0) / tf**2
+    a3 = -2.0 * (qf - q0) / tf**3
+    t = np.arange(0, tf + dt, dt)
+    q = q0 + a2 * t**2 + a3 * t**3
+    qd = 2 * a2 * t + 3 * a3 * t**2
+    qdd = 2 * a2 + 6 * a3 * t
+    return t, q, qd, qdd
+
+def quintic_interp(q0, qf, tf, dt=0.01):
+    """Quintic polynomial (continuous acceleration)."""
+    a3 = 10.0 * (qf - q0) / tf**3
+    a4 = -15.0 * (qf - q0) / tf**4
+    a5 = 6.0 * (qf - q0) / tf**5
+    t = np.arange(0, tf + dt, dt)
+    q = q0 + a3 * t**3 + a4 * t**4 + a5 * t**5
+    qd = 3 * a3 * t**2 + 4 * a4 * t**3 + 5 * a5 * t**4
+    qdd = 6 * a3 * t + 12 * a4 * t**2 + 20 * a5 * t**3
+    return t, q, qd, qdd
+
+# Parameters
+q0 = 0.0
+qf = np.radians(90)
+tf = 2.0
+
+methods = {
+    'Linear': linear_interp(q0, qf, tf),
+    'Cubic': cubic_interp(q0, qf, tf),
+    'Quintic': quintic_interp(q0, qf, tf),
+}
+
+fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+styles = {'Linear': ('gray', '-'), 'Cubic': ('blue', '-'), 'Quintic': ('red', '--')}
+
+for name, (t, q, qd, qdd) in methods.items():
+    color, ls = styles[name]
+    axes[0].plot(t, np.degrees(q), color=color, linestyle=ls, linewidth=2, label=name)
+    axes[1].plot(t, np.degrees(qd), color=color, linestyle=ls, linewidth=2, label=name)
+    if name != 'Linear':
+        axes[2].plot(t, np.degrees(qdd), color=color, linestyle=ls, linewidth=2, label=name)
+
+axes[0].set_ylabel('Position (deg)')
+axes[0].set_title('Comparison of Trajectory Interpolation Methods')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+axes[1].set_ylabel('Velocity (deg/s)')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+axes[2].set_ylabel('Acceleration (deg/s²)')
+axes[2].set_xlabel('Time (s)')
+axes[2].legend()
+axes[2].grid(True, alpha=0.3)
+axes[2].set_title('Acceleration (Linear omitted: infinite at endpoints)')
+
+plt.tight_layout()
+plt.savefig('interpolation_comparison.png', dpi=150)
+plt.show()
+
+# Print summary table
+print(f"{'Method':<10} {'Peak Vel (deg/s)':<20} {'Peak Accel (deg/s²)':<22} {'Accel at t=0':<18}")
+print("-" * 70)
+for name, (t, q, qd, qdd) in methods.items():
+    pv = np.degrees(np.max(np.abs(qd)))
+    if name == 'Linear':
+        pa = "inf (discontinuous)"
+        a0_str = "inf"
+    else:
+        pa = f"{np.degrees(np.max(np.abs(qdd))):.1f}"
+        a0_str = f"{np.degrees(qdd[0]):.1f}"
+    print(f"{name:<10} {pv:<20.1f} {pa:<22} {a0_str:<18}")
+```
+
+## System Application: Full Pick-and-Place Sequence
+
+<InArticleAd />
+
+
+We now apply the trajectory planning tools to our warehouse mobile manipulator. The robot must pick a box from a shelf at height 1.2 m and place it on a conveyor at height 0.8 m. The arm has actuator limits of 120 deg/s maximum joint velocity and 300 deg/s² maximum joint acceleration. The target cycle time is under 8 seconds.
+
+**Trajectory strategy for each phase:**
+
+| Phase | Planning Space | Method | Rationale |
+|-------|---------------|--------|-----------|
+| Move to approach | Joint space | Trapezoidal | Time-optimal, large motion |
+| Descend to object | Task space | Cubic polynomial | Smooth vertical descent, short distance |
+| Grasp (dwell) | None | Hold position | Gripper closes |
+| Lift | Task space | Cubic polynomial | Smooth vertical lift |
+| Transport | Joint space | Trapezoidal | Time-optimal, longest segment |
+| Lower to placement | Task space | Cubic polynomial | Smooth vertical descent |
+| Release (dwell) | None | Hold position | Gripper opens |
+| Return home | Joint space | Trapezoidal | Time-optimal return |
+
+**Cycle time budget:**
+
+| Phase | Duration |
+|-------|----------|
+| Move to approach | 1.2 s |
+| Descend | 0.5 s |
+| Grasp dwell | 0.3 s |
+| Lift | 0.5 s |
+| Transport | 2.5 s |
+| Lower | 0.5 s |
+| Release dwell | 0.3 s |
+| Return home | 1.5 s |
+| **Total** | **7.3 s** |
+
+This is within the 8-second target. The transport phase dominates the cycle time, so optimizing this segment (higher cruise velocity, shorter acceleration time) has the greatest impact on throughput.
+
+<details>
+<summary>Improving cycle time further</summary>
+
+Several strategies can reduce cycle time below 7 seconds:
+
+1. **Overlap phases:** Begin closing the gripper while the arm is still completing the final descent. This saves 100-200 ms.
+2. **Via-point blending:** Instead of coming to a full stop at the approach position, blend through it at reduced speed. The arm follows a smooth curve that passes close to the approach point without stopping.
+3. **Increase actuator limits:** Higher-torque motors allow larger $a_{max}$, which shortens the acceleration and deceleration phases of trapezoidal profiles.
+4. **Optimize waypoint placement:** Position the approach and lift waypoints closer to the grasp point to minimize the descent and lift distances.
+
+</details>
+
+## Design Guidelines
+
+<InArticleAd />
+
+
+<CardGrid>
+  <Card title="Match Method to Phase" icon="setting">
+    Use trapezoidal velocity profiles for long free-space motions where time matters. Use polynomial interpolation for short, precise segments where smoothness is critical. Use task-space planning only when the Cartesian path is important (approach, descent, straight-line segments).
+  </Card>
+
+  <Card title="Always Check Actuator Limits" icon="warning">
+    After generating any trajectory, compute the required joint velocities and accelerations and verify they are within the actuator ratings. For polynomial trajectories, the peak velocity and acceleration depend on the motion distance and duration. Shorter durations produce higher peaks.
+  </Card>
+
+  <Card title="Prefer Quintic for Delicate Payloads" icon="approve-check">
+    When carrying fragile items (electronics, glass, food products), use quintic polynomials to ensure zero jerk at segment transitions. The additional computational cost is negligible compared to the cost of dropped or damaged goods.
+  </Card>
+
+  <Card title="Test Blending Radii in Simulation" icon="setting">
+    Via-point blending trades path accuracy for speed. Always simulate the blended path and verify the maximum deviation from the nominal via points. For our warehouse application, a maximum deviation of 20 mm at via points is typically acceptable; for precision assembly, it may need to be under 0.1 mm.
+  </Card>
+</CardGrid>
+
+## Summary
+
+<InArticleAd />
+
+
+<CardGrid>
+  <Card title="Trajectory Planning Fundamentals" icon="open-book">
+    Joint-space planning is simple and singularity-free, while task-space planning provides Cartesian path control. Industrial systems combine both: joint-space for free motions, task-space for critical approach and departure segments.
+  </Card>
+
+  <Card title="Polynomial Interpolation" icon="open-book">
+    Cubic polynomials satisfy four boundary conditions (position and velocity at endpoints) and are the standard for smooth point-to-point motions. Quintic polynomials add acceleration continuity for even smoother transitions.
+  </Card>
+
+  <Card title="Trapezoidal Profiles" icon="open-book">
+    The trapezoidal velocity profile is time-optimal under velocity and acceleration constraints. It handles both the normal trapezoidal case (cruise phase present) and the degenerate triangular case (short distances).
+  </Card>
+
+  <Card title="Pick-and-Place Sequencing" icon="open-book">
+    A complete pick-and-place cycle is a sequence of trajectory segments, each chosen for its specific purpose. Proper phase sequencing, dwell times, and via-point blending determine the achievable cycle time and reliability.
+  </Card>
+</CardGrid>
+
+**Next lesson:** We build complete Python robot simulations with 3D visualization, then connect the kinematic and trajectory planning tools from this course to real-world applications in manufacturing, logistics, medical robotics, and agricultural automation.
+
+
+
+<InArticleAd />
+<RoboticsComments />
+<TawkWidget />
+<Copyright />
