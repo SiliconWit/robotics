@@ -12,6 +12,8 @@ sidebar:
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Contributors Welcome](https://img.shields.io/badge/contributors-welcome-orange)
 
+**Read this course at:** [https://siliconwit.com/education/robotics/](https://siliconwit.com/education/robotics/)
+
 A course on robot kinematics and manipulation, covering robot arm geometry, forward and inverse kinematics, quaternion orientation, Jacobian velocity analysis, trajectory planning, and Python simulation. Each lesson pairs rigorous theory with working code so you can visualize and verify every concept.
 
 ## Lessons
