@@ -94,22 +94,7 @@ These parameters, along with the joint variable, fully describe the relative pos
 
 ### Joint Types
 
-Joints constrain the relative motion between two links. The type of joint determines how many degrees of freedom it contributes and what kind of motion it allows.
-
-```text
-  Revolute (R)             Prismatic (P)            Spherical (S)
-  1 DOF: rotation          1 DOF: translation       3 DOF: rotation
-
-       axis                     axis                  3 axes through
-        |                        |                    one point
-        |  /--- link 2           |                        |
-        | /  arc of              |  =====> link 2     link | link
-  link 1 +   rotation      link 1 |  slide            1  (O)  2
-        |  \                     |  =====>                |
-        |   \--- link 2'         |                    free rotation
-        |                        |                    in all directions
-  (rotates about axis)    (slides along axis)     (ball-and-socket)
-```
+Joints constrain the relative motion between two links. The type of joint determines how many degrees of freedom it contributes and what kind of motion it allows. For a detailed treatment of joint classification, DOF counting with Grubler's formula, and 3D constraint analysis, see [Kinematic Joints and Degrees of Freedom](/education/spatial-mechanics/kinematic-joints-degrees-freedom/).
 
 <Tabs>
 <TabItem label="Revolute (R)">
