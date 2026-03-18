@@ -1,7 +1,7 @@
 ---
 title: "Lesson 6: Robot Simulation and Practical Applications"
 description: "Build Python robot simulations with real-time visualization and apply robotics across manufacturing, medical, logistics, and agricultural domains"
-contributors: "sam-macharia"
+contributors: "sam-macharia, morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "simulation", "matplotlib-animation", "manufacturing", "surgical-robotics", "agricultural-robotics", "pick-and-place", "visualization"]
 excerpt: "Build complete robot simulations through a multi-robot agricultural harvesting system. Learn Python-based simulation with matplotlib, real-time visualization, and apply robotics principles across manufacturing, logistics, medical, and agricultural domains."
@@ -198,6 +198,20 @@ The determinant $\det(J) = L_1 L_2 \sin(\theta_2)$ vanishes when $\theta_2 = 0$ 
 The matplotlib library provides everything needed for 2D robot simulation visualization. The `FuncAnimation` class drives the animation loop, calling an update function at each frame to redraw the robot arm, trajectory trail, and workspace overlays. This approach is simple enough for educational use while being powerful enough to visualize complex multi-robot scenarios.
 
 #### FuncAnimation Usage
+
+```mermaid
+flowchart TD
+    A[Initialize figure, axes, artists] --> B[init function: set empty data]
+    B --> C[FuncAnimation starts loop]
+    C --> D[update frame i]
+    D --> E[Compute joint angles for time t_i]
+    E --> F[Run FK to get link positions]
+    F --> G[Update line artists and markers]
+    G --> H[Append to trajectory trail]
+    H --> I{More frames?}
+    I -- Yes --> D
+    I -- No --> J[Save animation or display]
+```
 
 The animation loop follows this structure:
 
@@ -871,6 +885,22 @@ def check_robot_collision(robot_a, robot_b):
 
 
 Now we bring everything together into the multi-robot strawberry harvesting system described in the engineering challenge. Three 2R arms are mounted along a gantry, each with its own workspace. A set of fruit positions is provided by the vision system. The simulation allocates fruit to the nearest available robot, plans collision-free trajectories, and animates the entire sequence.
+
+```mermaid
+flowchart TD
+    A[Vision system detects fruit positions] --> B[For each fruit: find nearest robot]
+    B --> C{Fruit in robot workspace?}
+    C -- Yes --> D[Assign to nearest robot]
+    C -- No, in overlap zone --> E[Assign to robot with\nhigher manipulability]
+    C -- No, unreachable --> F[Skip or flag for manual pickup]
+    D --> G[Plan trajectory per robot]
+    E --> G
+    G --> H[Check for inter-robot collisions]
+    H --> I{Collision?}
+    I -- Yes --> J[Stagger timing or replan]
+    I -- No --> K[Execute all trajectories in parallel]
+    J --> K
+```
 
 ### Task Allocation Strategy
 

@@ -1,7 +1,7 @@
 ---
 title: "Lesson 2: Forward and Inverse Kinematics"
 description: "Compute end-effector positions from joint angles and solve inverse kinematics for robotic welding, assembly, and precision positioning"
-contributors: "sam-macharia"
+contributors: "sam-macharia, morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "forward-kinematics", "inverse-kinematics", "DH-parameters", "end-effector", "robotic-welding", "numerical-IK"]
 excerpt: "Explore forward and inverse kinematics through robotic welding applications. Learn FK equations for position computation, geometric and numerical IK methods, multiple solution handling, and workspace boundary analysis for industrial manipulators."
@@ -63,6 +63,23 @@ Robotic welding is one of the largest applications of industrial manipulators. A
 Forward kinematics answers the question: given all joint angles $\theta_1, \theta_2, \dots, \theta_n$, where is the end-effector in Cartesian space? For serial manipulators, the answer is built by chaining coordinate transformations from the base frame through each link to the tool frame. We begin with the simplest case, a 2R planar robot, then extend the approach to general serial chains using DH parameters.
 
 ### FK for a 2R Planar Robot
+
+```text
+  2R Planar Robot Arm
+
+                          end-effector (x_e, y_e)
+                         /
+                        / Link 2 (L2)
+                       /
+              elbow --+  angle theta2
+             (x1,y1) /   (relative to Link 1)
+                     /
+                    / Link 1 (L1)
+                   /
+                  / angle theta1
+  base (0,0) ---+  (from +x axis)
+                 -----------> x
+```
 
 Consider a planar robot with two revolute joints. Link 1 has length $L_1$ and rotates by angle $\theta_1$ from the horizontal. Link 2 has length $L_2$ and rotates by angle $\theta_2$ relative to link 1.
 
@@ -188,6 +205,22 @@ def plot_robot_2R(L1, L2, theta1, theta2, target=None, title="2R Robot Arm"):
 ### Denavit-Hartenberg (DH) Parameter Convention
 
 For robots with more than two or three joints, writing out FK equations by hand becomes error-prone. The Denavit-Hartenberg convention provides a systematic way to assign coordinate frames to each link and express the transformation between consecutive frames using exactly four parameters. If you covered spatial mechanics and transformation matrices in a prerequisite course, the DH formulation should feel like a natural extension of those concepts.
+
+```text
+  DH Frame Assignment (two consecutive frames)
+
+  z_{i-1}                          z_i
+    |                                |
+    |  d_i (offset along z_{i-1})   |
+    |  |                             |
+    |  v                             |
+    +---------> x_{i-1}             +---------> x_i
+   frame i-1                       frame i
+              |<--- a_i (link length along x_i) --->|
+
+  alpha_i = angle from z_{i-1} to z_i, measured about x_i
+  theta_i = angle from x_{i-1} to x_i, measured about z_{i-1}
+```
 
 Each link $i$ in a serial chain is described by four DH parameters:
 
@@ -316,6 +349,24 @@ $$
 $$
 
 The two signs correspond to two valid configurations: **elbow-up** ($\theta_2 > 0$) and **elbow-down** ($\theta_2 < 0$).
+
+```text
+  Two IK Solutions for the Same Target
+
+  Elbow-Up (theta2 > 0)         Elbow-Down (theta2 < 0)
+
+           elbow                            * target
+          / \                              /
+    L1   /   \  L2                   L2   /
+        /     \                          /
+       /       * target            elbow +
+  base +                                  \   L1
+                                           \
+                                        base +
+
+  Same target point, two valid arm configurations.
+  Continuous paths should maintain one configuration.
+```
 
 :::note[Using atan2 for robustness]
 A more numerically robust approach computes $\sin(\theta_2)$ from $c_2$ and uses `atan2`:
@@ -465,6 +516,19 @@ def plot_ik_solutions(L1, L2, x_t, y_t):
 Geometric IK works beautifully for simple planar robots, but it does not scale to 6-DOF spatial manipulators or robots with complex joint configurations. Numerical IK uses iterative optimization to converge on a solution. The most common approach is the Jacobian-based Newton-Raphson method, which linearizes the FK mapping at each step and solves a linear system to update the joint angles.
 
 **The Algorithm:**
+
+```mermaid
+flowchart TD
+    A[Start with initial guess q0] --> B[Compute FK: p_current = FK q_k]
+    B --> C[Compute error: dp = p_target - p_current]
+    C --> D{error < tolerance?}
+    D -- Yes --> E[Solution found: return q_k]
+    D -- No --> F[Compute Jacobian J at q_k]
+    F --> G[Solve: dq = J_inv * dp]
+    G --> H[Update: q_k+1 = q_k + dq]
+    H --> B
+    style E stroke:#84cc16
+```
 
 <Steps>
 1. Start with an initial guess $\mathbf{q}_0$ for the joint angles.
@@ -662,6 +726,27 @@ for q0, label in initial_guesses:
 
 
 The workspace of a robot is the set of all points the end-effector can reach. For a 2R planar robot, the workspace is an annular region (a ring) between two concentric circles. The outer boundary has radius $r_{\max} = L_1 + L_2$ (arm fully extended). The inner boundary has radius $r_{\min} = |L_1 - L_2|$ (arm fully folded back). If $L_1 = L_2$, the inner boundary collapses to a single point at the origin, and the entire disk is reachable.
+
+```text
+  Workspace of a 2R Robot (L1 != L2)
+
+           . - ~ ~ ~ - .               outer boundary
+       . '       |         ' .         r_max = L1 + L2
+     /           |             \
+    |        . - - - .          |
+    |      /    |      \        |
+    |     |   (base)    |       |       inner boundary
+    |      \    |      /        |       r_min = |L1 - L2|
+    |        ' - - - '          |
+     \           |             /        reachable workspace
+       .         |          . '         = annular region
+         ' - . _ _ _ . - '             (shaded ring between circles)
+
+  Points inside inner circle: UNREACHABLE (arm cannot fold enough)
+  Points outside outer circle: UNREACHABLE (arm cannot extend enough)
+  Points in the ring: REACHABLE (2 solutions: elbow-up, elbow-down)
+  Points on outer circle: REACHABLE (1 solution: arm fully extended)
+```
 
 ```python
 def plot_workspace_2R(L1, L2, n_samples=5000):

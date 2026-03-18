@@ -1,7 +1,7 @@
 ---
 title: "Lesson 5: Trajectory Planning and Motion Control"
 description: "Plan smooth robot trajectories using polynomial interpolation, splines, and velocity profiles for pick-and-place and path following tasks"
-contributors: "sam-macharia"
+contributors: "sam-macharia, morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "trajectory-planning", "motion-control", "pick-and-place", "polynomial-interpolation", "spline", "velocity-profile", "path-planning"]
 excerpt: "Learn trajectory planning through warehouse mobile manipulator pick-and-place operations. Cover joint-space and task-space planning, polynomial and spline interpolation, trapezoidal velocity profiles, and complete pick-and-place task sequencing."
@@ -60,6 +60,19 @@ A trajectory that commands instantaneous velocity changes requires infinite acce
 
 
 ### Joint-Space vs. Task-Space Trajectory Planning
+
+```mermaid
+flowchart LR
+    subgraph Joint-Space
+        A1[q_start] --> B1[Interpolate\neach joint\nindependently] --> C1[q_goal]
+    end
+    subgraph Task-Space
+        A2[x_start] --> B2[Interpolate\nCartesian pose\n+ IK at each step] --> C2[x_goal]
+    end
+    D{Which to use?}
+    D -- Path shape does not matter --> Joint-Space
+    D -- Path shape is critical --> Task-Space
+```
 
 There are two fundamental approaches to planning a robot trajectory. Joint-space planning interpolates directly between joint angle vectors, while task-space planning interpolates the end-effector pose (position and orientation) in Cartesian coordinates. Each approach has distinct advantages and trade-offs.
 
@@ -251,6 +264,31 @@ Use cubic polynomials when computational speed matters and moderate smoothness i
 
 ### Trapezoidal Velocity Profile
 
+```text
+  Trapezoidal Velocity Profile
+
+  velocity
+    ^
+    |         +-----------------+
+  v_max ......|                 |..............
+    |        /|                 |\
+    |       / |                 | \
+    |      /  |                 |  \
+    |     /   |                 |   \
+    |    /    |                 |    \
+    |   /     |                 |     \
+    +--/------+-----------------+------\----> time
+    0  t_a                    t_a+t_c  t_f
+
+       Phase 1    Phase 2       Phase 3
+       Accel      Cruise        Decel
+       (a_max)    (v = v_max)   (-a_max)
+
+  If distance is too short to reach v_max,
+  the cruise phase vanishes and the profile
+  becomes triangular (accel then decel).
+```
+
 In industrial applications, actuators have hard limits on maximum velocity and maximum acceleration. The trapezoidal velocity profile is the time-optimal trajectory under these constraints. It consists of three phases: constant acceleration, constant velocity (cruise), and constant deceleration. The velocity profile looks like a trapezoid when plotted against time.
 
 Given maximum velocity $v_{max}$ and maximum acceleration $a_{max}$, the motion from $q_0$ to $q_f$ (with $\Delta q = q_f - q_0 > 0$) has:
@@ -309,6 +347,28 @@ If the two adjacent segments have opposite signs (the joint reverses direction),
 </details>
 
 ### Pick-and-Place Task Phases
+
+```mermaid
+stateDiagram-v2
+    [*] --> MoveToApproach
+    MoveToApproach --> Descend
+    Descend --> Grasp
+    Grasp --> Lift
+    Lift --> Transport
+    Transport --> Lower
+    Lower --> Release
+    Release --> ReturnHome
+    ReturnHome --> [*]
+
+    MoveToApproach: Move to approach\n(joint-space)
+    Descend: Descend to object\n(task-space, vertical)
+    Grasp: Grasp\n(dwell 200-500 ms)
+    Lift: Lift\n(task-space, vertical)
+    Transport: Transport\n(joint-space, trapezoidal)
+    Lower: Lower to placement\n(task-space, vertical)
+    Release: Release\n(dwell 200-500 ms)
+    ReturnHome: Return home\n(joint-space)
+```
 
 A complete pick-and-place operation is a sequence of trajectory segments, each designed for a specific purpose. The segments are connected end-to-end with matching positions and velocities at the transition points. Here is the full phase breakdown for our warehouse manipulator.
 

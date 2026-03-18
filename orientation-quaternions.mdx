@@ -1,7 +1,7 @@
 ---
 title: "Lesson 3: Orientation and Quaternions"
 description: "Represent 3D orientations using quaternions for smooth robotic motion, avoiding gimbal lock with SLERP interpolation and rotation composition"
-contributors: "sam-macharia"
+contributors: "sam-macharia, morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "quaternions", "euler-angles", "gimbal-lock", "SLERP", "rotation", "orientation-control", "drone-gimbal"]
 excerpt: "Learn quaternion-based orientation control through drone gimbal stabilization and surgical tool positioning. Cover Euler angle limitations, quaternion algebra, SLERP interpolation, and rotation composition for smooth, singularity-free robotic motion."
@@ -111,6 +111,26 @@ There are 12 possible Euler angle conventions (XYZ, ZYX, ZXZ, etc.). Robotics co
 
 ### The Gimbal Lock Problem
 
+```text
+  Gimbal Lock: Three Nested Rings
+
+  Normal Operation (pitch != 90)        Gimbal Lock (pitch = 90)
+
+       +--- yaw ring ---+                 +--- yaw ring ---+
+       |                 |                 |                 |
+       | +- pitch ring + |                 | +- pitch ring + |
+       | |             | |                 | |      |      | |
+       | | +- roll -+  | |                 | | +- roll -+  | |
+       | | | camera |  | |                 | | | camera |  | |
+       | | +--------+  | |                 | | +--------+  | |
+       | +-------------+ |                 | +------+------+ |
+       +-----------------+                 +--------+--------+
+                                                    |
+       3 independent axes                  yaw and roll axes
+       = 3 DOF                             now PARALLEL = 2 DOF
+                                           (1 DOF lost)
+```
+
 Gimbal lock occurs when the middle rotation in an Euler angle sequence reaches $\pm 90°$, causing the first and third rotation axes to align. At this configuration, the three-parameter representation effectively collapses to two parameters, and one degree of rotational freedom becomes uncontrollable.
 
 **Physical Explanation:**
@@ -203,6 +223,28 @@ $$
 This constraint means that 3D rotations live on a 3-dimensional surface ($S^3$) embedded in 4D space. The unit quaternion group is a **double cover** of the rotation group SO(3): both $\mathbf{q}$ and $-\mathbf{q}$ represent the same physical rotation.
 
 ### Quaternion from Axis-Angle Representation
+
+```text
+  Axis-Angle to Quaternion Mapping
+
+  Axis-Angle:                     Quaternion:
+
+       n_hat (unit axis)            q = [w,  x,  y,  z]
+          |  /                           |         |
+          | / theta                      |         |
+          |/  (rotation                  |         +-- sin(theta/2) * n_hat
+          +--- angle)                    |
+       origin                            +-- cos(theta/2)
+
+  Example: 90 deg about Z-axis
+
+  n_hat = (0, 0, 1), theta = 90 deg
+
+  w = cos(45) = 0.707
+  x = sin(45) * 0 = 0
+  y = sin(45) * 0 = 0         q = [0.707, 0, 0, 0.707]
+  z = sin(45) * 1 = 0.707
+```
 
 Any 3D rotation can be described as a rotation by angle $\theta$ about a unit axis $\hat{\mathbf{n}} = (n_x, n_y, n_z)$. The corresponding unit quaternion is:
 
@@ -675,6 +717,15 @@ print("Euler interpolation has variable speed and may produce unexpected paths")
 
 
 We now apply quaternion theory to the drone gimbal stabilization problem. The gimbal must smoothly track a target orientation while the drone body rotates underneath it. Using quaternions, we compute the required gimbal correction at each time step and generate smooth command trajectories via SLERP.
+
+```mermaid
+flowchart LR
+    A[IMU measures\nq_body] --> B[Compute correction\nq_gimbal = q_body_inv * q_desired]
+    B --> C[SLERP smooth\ncommand trajectory]
+    C --> D[Apply to\ngimbal motors]
+    D --> E[Camera holds\nq_desired orientation]
+    E --> A
+```
 
 ### Problem Setup
 

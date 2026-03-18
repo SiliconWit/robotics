@@ -1,7 +1,7 @@
 ---
 title: "Lesson 1: Robot Arm Geometry and Configuration"
 description: "Analyze robot arm link design, joint types, workspace boundaries, and common configurations including SCARA, articulated, and delta robots"
-contributors: "sam-macharia"
+contributors: "sam-macharia, morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "robot-arm", "workspace-analysis", "joint-types", "SCARA", "articulated-robot", "delta-robot", "link-design"]
 excerpt: "Learn robot arm geometry through industrial pick-and-place systems. Analyze link design, joint types, workspace boundaries, and common robot configurations including SCARA, articulated, and delta architectures for manufacturing automation."
@@ -74,9 +74,42 @@ Each link in a robot arm is characterized by two geometric properties:
 These parameters, along with the joint variable, fully describe the relative position and orientation of consecutive links. We will formalize this using Denavit-Hartenberg parameters in a later lesson.
 </Card>
 
+```text
+  Link Parameters Between Two Joints
+
+     joint i-1 axis          joint i axis
+          |                       |
+          |                       |
+          |      link length      |
+          |<------- a_i -------->|
+          |                       |
+          +--- common normal ----+
+          |                       |
+          |   link twist = alpha_i
+          |   (angle between the
+          |    two joint axes,
+          |    measured about the
+          |    common normal)
+```
+
 ### Joint Types
 
 Joints constrain the relative motion between two links. The type of joint determines how many degrees of freedom it contributes and what kind of motion it allows.
+
+```text
+  Revolute (R)             Prismatic (P)            Spherical (S)
+  1 DOF: rotation          1 DOF: translation       3 DOF: rotation
+
+       axis                     axis                  3 axes through
+        |                        |                    one point
+        |  /--- link 2           |                        |
+        | /  arc of              |  =====> link 2     link | link
+  link 1 +   rotation      link 1 |  slide            1  (O)  2
+        |  \                     |  =====>                |
+        |   \--- link 2'         |                    free rotation
+        |                        |                    in all directions
+  (rotates about axis)    (slides along axis)     (ball-and-socket)
+```
 
 <Tabs>
 <TabItem label="Revolute (R)">
@@ -715,6 +748,35 @@ compare_configurations()
 Let us return to the circuit board handling cell and apply what we have learned about arm geometry and configuration selection. The three stations (reflow oven output, inspection camera, packaging tray) define the workspace requirements, and the footprint constraint limits our configuration choices.
 
 ### Station Layout Analysis
+
+```text
+  Top View: 1.2 m x 1.2 m Cell Layout
+
+  y (m)
+  0.6 +-----------------------------------------------+
+      |                                               |
+  0.5 |            [Inspection Camera]                |
+      |              (0.10, 0.50)                     |
+  0.4 |                                               |
+      |  [Packaging Tray]                             |
+  0.3 |   (-0.30, 0.35)                              |
+      |                                               |
+  0.2 |                          [Conveyor Pickup]    |
+      |               (base)      (0.45, 0.15)       |
+  0.1 |                 +                              |
+      |              ROBOT                            |
+  0.0 |           (0.0, 0.0)                          |
+      |                                               |
+ -0.1 |                                               |
+      |                                               |
+      +-----------------------------------------------+
+     -0.6                  0.0                     0.6  x (m)
+
+  Distances from base:
+    Conveyor:   0.47 m
+    Inspection: 0.51 m  (farthest, sets minimum reach)
+    Tray:       0.46 m
+```
 
 <Steps>
 1. **Map the station positions**
