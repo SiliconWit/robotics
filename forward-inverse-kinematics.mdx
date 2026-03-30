@@ -18,13 +18,17 @@ import TailwindWrapper from '../../../../components/TailwindWrapper.jsx';
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/starlight/components';
 
-<UniversalContentContributors 
+<UniversalContentContributors
   contributors={frontmatter.contributors}
 />
 
 
 
+import PodcastEmbed from '../../../../components/PodcastEmbed.astro';
+
 Forward and inverse kinematics are the two central problems in robotic manipulation. Forward kinematics (FK) maps joint angles to end-effector position, answering "where is the tool?" Inverse kinematics (IK) reverses the question: "what joint angles place the tool at this target?" This lesson develops both frameworks through a robotic welding application, using geometric closed-form solutions and numerical iteration for when closed-form methods break down. #ForwardKinematics #InverseKinematics #RoboticWelding
+
+<PodcastEmbed src="https://open.spotify.com/episode/3LAHpB4zmdXlvx0RSDnWcg?si=dN6VbnmVScqKQxUJ673VgA" />
 
 ## Learning Objectives
 
