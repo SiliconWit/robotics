@@ -62,7 +62,7 @@ A trajectory that commands instantaneous velocity changes requires infinite acce
 ### Joint-Space vs. Task-Space Trajectory Planning
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph Joint-Space
         A1[q_start] --> B1[Interpolate\neach joint\nindependently] --> C1[q_goal]
     end

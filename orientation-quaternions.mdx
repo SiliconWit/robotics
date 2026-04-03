@@ -719,7 +719,7 @@ print("Euler interpolation has variable speed and may produce unexpected paths")
 We now apply quaternion theory to the drone gimbal stabilization problem. The gimbal must smoothly track a target orientation while the drone body rotates underneath it. Using quaternions, we compute the required gimbal correction at each time step and generate smooth command trajectories via SLERP.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[IMU measures\nq_body] --> B[Compute correction\nq_gimbal = q_body_inv * q_desired]
     B --> C[SLERP smooth\ncommand trajectory]
     C --> D[Apply to\ngimbal motors]
