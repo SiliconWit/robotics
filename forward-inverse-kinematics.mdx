@@ -1,11 +1,11 @@
 ---
-title: "Lesson 2: Forward and Inverse Kinematics"
+title: "Forward and Inverse Kinematics"
 description: "Compute end-effector positions from joint angles and solve inverse kinematics for robotic welding, assembly, and precision positioning"
 contributors: "sam-macharia,francis-maina,morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "forward-kinematics", "inverse-kinematics", "DH-parameters", "end-effector", "robotic-welding", "numerical-IK"]
 excerpt: "Explore forward and inverse kinematics through robotic welding applications. Learn FK equations for position computation, geometric and numerical IK methods, multiple solution handling, and workspace boundary analysis for industrial manipulators."
-heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+heroImage: "https://cdn.siliconwit.com/education/robotics/forward-inverse-kinematics.png"
 ---
 
 import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
@@ -253,6 +253,10 @@ The overall FK from base to end-effector is the product of all individual transf
 $$
 T_{\text{base}}^{\text{ee}} = T_1 \cdot T_2 \cdot T_3 \cdots T_n
 $$
+
+:::note[This Lesson Uses Classical DH]
+The matrix above follows the **classical** (original Denavit-Hartenberg 1955) convention, where frame $i$ is attached to the far end of link $i$ and the transform order is $\text{Rot}_z(\theta_i) \cdot \text{Trans}_z(d_i) \cdot \text{Trans}_x(a_i) \cdot \text{Rot}_x(\alpha_i)$. The **modified** (Craig 1986) convention attaches frame $i$ to joint $i$ instead, and its transform order is $\text{Rot}_x(\alpha_{i-1}) \cdot \text{Trans}_x(a_{i-1}) \cdot \text{Rot}_z(\theta_i) \cdot \text{Trans}_z(d_i)$. Parameter indices shift between the two conventions, so a DH table copied from a KUKA manual will not work unchanged with the matrix above. Libraries like [Robotics Toolbox for Python](https://petercorke.github.io/robotics-toolbox-python/) let you specify the convention explicitly with `RevoluteDH(...)` vs `RevoluteMDH(...)`.
+:::
 
 ```python
 def dh_transform(theta, d, a, alpha):
@@ -915,6 +919,18 @@ def plan_weld_path(L1, L2, waypoints, elbow_config="up"):
             idx = min(sol_idx, len(solutions) - 1)
             joint_trajectory.append(solutions[idx])
 
+            # Continuity check: if the chosen solution jumps far from
+            # the previous one, the branch just flipped. For real
+            # trajectories you would pick the solution that minimizes
+            # joint distance from the previous configuration instead.
+            if i > 0 and joint_trajectory[i - 1] is not None:
+                prev = np.array(joint_trajectory[i - 1])
+                curr = np.array(joint_trajectory[i])
+                if np.linalg.norm(curr - prev) > np.pi / 2:
+                    print(f"  Waypoint {i}: branch switch detected. "
+                          f"Continuous paths must not cross between "
+                          f"elbow-up and elbow-down.")
+
             if reach['near_boundary']:
                 print(f"  Waypoint {i}: ({x:.1f}, {y:.1f}) "
                       f"near workspace boundary "
@@ -1035,6 +1051,23 @@ def plot_weld_path(L1, L2, waypoints, trajectory):
 
   <Card title="Handle Unreachable Points Gracefully" icon="warning">
     In production systems, the path planner must detect unreachable waypoints before execution begins. Options include repositioning the robot base, splitting the task across multiple setups, or using a robot with longer reach. Never allow the controller to attempt IK on an unreachable target without a fallback strategy.
+  </Card>
+
+  <Card title="Check Joint Limits After IK" icon="warning">
+    The geometric IK function above returns mathematically valid angles but does not know about your robot's joint limits. A target can be inside the reachable workspace and still require a joint angle outside `[theta_min, theta_max]`. Wrap every IK call with a limit check:
+
+    ```python
+    for (t1, t2) in solutions:
+        if (theta1_min <= t1 <= theta1_max
+                and theta2_min <= t2 <= theta2_max):
+            # use this solution
+    ```
+
+    If no solution satisfies the limits, the target is unreachable in practice even though it is inside the ideal workspace.
+  </Card>
+
+  <Card title="Be Consistent About Units" icon="information">
+    The examples here use millimeters for link lengths and radians for joint angles. Mixing unit systems is a classic bug source: passing degrees into `np.cos`, or millimeters into a function expecting meters. Pick one convention per codebase, document it at the module level, and convert only at the interface with the UI or hardware driver. Angles should travel as radians through every internal function.
   </Card>
 </CardGrid>
 

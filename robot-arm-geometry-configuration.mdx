@@ -1,11 +1,11 @@
 ---
-title: "Lesson 1: Robot Arm Geometry and Configuration"
+title: "Robot Arm Geometry and Configuration"
 description: "Analyze robot arm link design, joint types, workspace boundaries, and common configurations including SCARA, articulated, and delta robots"
 contributors: "sam-macharia,francis-maina,morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "robot-arm", "workspace-analysis", "joint-types", "SCARA", "articulated-robot", "delta-robot", "link-design"]
 excerpt: "Learn robot arm geometry through industrial pick-and-place systems. Analyze link design, joint types, workspace boundaries, and common robot configurations including SCARA, articulated, and delta architectures for manufacturing automation."
-heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+heroImage: "https://cdn.siliconwit.com/education/robotics/robot-arm-geometry-configuration.png"
 ---
 
 import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
@@ -30,7 +30,7 @@ Every robot arm is a chain of rigid links connected by joints. The geometry of t
 
 <PodcastEmbed src="https://open.spotify.com/episode/3y45zu1iGT434RTiAxP9Py?si=L8R4ZYi4Rw-b3OsXHvhdjw" />
 
-## 🎯 Learning Objectives
+## Learning Objectives
 
 By the end of this lesson, you will be able to:
 
@@ -41,7 +41,7 @@ By the end of this lesson, you will be able to:
 5. <Badge text="Visualize" variant="note" /> workspace boundaries using Python and matplotlib
 6. <Badge text="Apply" variant="note" /> configuration selection criteria to real industrial pick-and-place problems
 
-## 🔧 Real-World Engineering Challenge: Industrial Pick-and-Place Cell
+## Real-World Engineering Challenge: Industrial Pick-and-Place Cell
 
 <InArticleAd />
 
@@ -60,7 +60,7 @@ A consumer electronics factory needs to automate the transfer of circuit boards 
 
 Choosing the wrong robot configuration for a cell layout is one of the most expensive mistakes in automation. A 6-DOF articulated arm might seem like the safe choice for any task, but it could be slower, more expensive, and harder to program than a SCARA robot for this particular application. The geometry of the task, the shape of the required workspace, and the motion constraints all point toward specific configurations. Understanding arm geometry lets you make this selection with confidence before committing to hardware.
 
-## 📚 Fundamental Theory: Robot Arm Structure
+## Fundamental Theory: Robot Arm Structure
 
 <InArticleAd />
 
@@ -77,6 +77,10 @@ Each link in a robot arm is characterized by two geometric properties:
 
 These parameters, along with the joint variable, fully describe the relative position and orientation of consecutive links. We will formalize this using Denavit-Hartenberg parameters in a later lesson.
 </Card>
+
+:::note[Two Flavors of DH Exist]
+When you import DH tables from a real robot, you will quickly discover there are **two DH conventions** in use: the **classical** (original 1955) version and the **modified** (Craig 1986) version. They differ in where each link frame is attached (at the end of link $i$ versus at joint $i$) and in the order of the elementary transforms. Parameters with the same name can refer to different physical quantities. Manufacturers are inconsistent: KUKA, ABB, and Universal Robots publish tables that are not directly interchangeable. Always check which convention a table uses before feeding it into your FK code, otherwise you will get silently wrong poses. The next lesson picks one convention and uses it consistently.
+:::
 
 ```text
   Link Parameters Between Two Joints
@@ -235,7 +239,7 @@ For a 2R arm with joint limits $\theta_1 \in [\theta_{1,\min}, \theta_{1,\max}]$
 - If $\theta_1$ is limited (e.g., $\pm$150°), the workspace becomes a sector of the annulus
 - If $\theta_2$ is limited, the inner and outer boundaries change shape
 
-## 📐 Common Robot Configurations
+## Common Robot Configurations
 
 <InArticleAd />
 
@@ -326,6 +330,10 @@ When the last three joint axes intersect at a single point (spherical wrist), th
 
 **Speed advantage:** Because the heavy motors are mounted on the fixed base and only lightweight links move, delta robots can achieve accelerations of 10g or more, with cycle times under 0.5 seconds.
 
+:::note[Parallel vs Serial Kinematics]
+Unlike SCARA, articulated, and Cartesian arms, a delta robot is a **parallel mechanism**: it has **closed kinematic loops** between base and end-effector. This changes the DOF analysis fundamentally. The simple "sum the joint DOFs" rule no longer applies; you must use Grubler's formula for closed chains (a delta has around 9 joints but only 3 DOF because most are passive). Forward and inverse kinematics are also inverted compared to serial arms: IK is easy (solve each leg independently), FK is hard (solve a system of three simultaneous nonlinear equations). This is why parallel-robot controllers look so different from serial ones. See [Kinematic Joints and Degrees of Freedom](/education/spatial-mechanics/kinematic-joints-degrees-freedom/) for the full DOF counting machinery.
+:::
+
 </TabItem>
 <TabItem label="Cartesian / Gantry">
 
@@ -377,7 +385,7 @@ Highest stiffness and payload capacity. Best for large workspaces, heavy payload
 </Card>
 </CardGrid>
 
-## 🖥️ Python Workspace Visualization
+## Python Workspace Visualization
 
 <InArticleAd />
 
@@ -729,7 +737,7 @@ def compare_configurations():
 compare_configurations()
 ```
 
-## 🎯 System Application: Solving the Pick-and-Place Problem
+## System Application: Solving the Pick-and-Place Problem
 
 <InArticleAd />
 
@@ -842,7 +850,7 @@ Could work, but the gantry structure would take significant overhead space. Also
 </Card>
 </CardGrid>
 
-## 🛠️ Design Guidelines
+## Design Guidelines
 
 <InArticleAd />
 
@@ -885,7 +893,7 @@ Could work, but the gantry structure would take significant overhead space. Also
 - **Confusing reachable and dexterous workspace:** A point inside the reachable workspace is not guaranteed to be accessible with the required end-effector orientation.
 :::
 
-## 📋 Summary
+## Summary
 
 <InArticleAd />
 
@@ -902,7 +910,7 @@ This lesson covered the structural foundations of robot arm design:
 
 5. **Configuration selection** should be driven by task DOF, workspace shape, station layout, cycle time, and payload requirements.
 
-**Coming Next:** In Lesson 2, we will formalize the relationship between joint angles and end-effector position using forward kinematics and the Denavit-Hartenberg convention, building the mathematical framework for precise robot motion control.
+**What comes next:** [Forward and Inverse Kinematics](./forward-inverse-kinematics) formalizes the relationship between joint angles and end-effector position using the Denavit-Hartenberg convention, building the mathematical framework for precise robot motion control.
 
 
 

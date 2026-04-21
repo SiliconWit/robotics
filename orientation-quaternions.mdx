@@ -1,11 +1,11 @@
 ---
-title: "Lesson 3: Orientation and Quaternions"
+title: "Orientation and Quaternions"
 description: "Represent 3D orientations using quaternions for smooth robotic motion, avoiding gimbal lock with SLERP interpolation and rotation composition"
 contributors: "sam-macharia,francis-maina,morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "quaternions", "euler-angles", "gimbal-lock", "SLERP", "rotation", "orientation-control", "drone-gimbal"]
 excerpt: "Learn quaternion-based orientation control through drone gimbal stabilization and surgical tool positioning. Cover Euler angle limitations, quaternion algebra, SLERP interpolation, and rotation composition for smooth, singularity-free robotic motion."
-heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+heroImage: "https://cdn.siliconwit.com/education/robotics/orientation-quaternions.png"
 ---
 
 import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
@@ -24,9 +24,13 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 
 
+import PodcastEmbed from '../../../../components/PodcastEmbed.astro';
+
 Quaternions provide a compact, singularity-free representation of 3D orientation that is essential for smooth robotic motion. This lesson builds from Euler angle limitations through quaternion algebra to practical SLERP interpolation, applied to drone gimbal stabilization and surgical tool positioning. #robotics #quaternions #orientation-control
 
-## 🎯 Learning Objectives
+<PodcastEmbed src="https://open.spotify.com/episode/1khwI5dNHsHDBZKMOrwKCt?si=qGHKuTQqS82z6dHmhabKFw" />
+
+## Learning Objectives
 
 By the end of this lesson, you will be able to:
 
@@ -36,7 +40,7 @@ By the end of this lesson, you will be able to:
 4. **Apply** <Badge text="quaternion operations" variant="note" /> to rotate vectors and compose sequential <Badge text="3D rotations" variant="tip" /> without singularities
 5. **Compare** <Badge text="Euler angles" variant="caution" />, <Badge text="rotation matrices" variant="tip" />, and <Badge text="quaternions" variant="note" /> for different robotic applications
 
-## 🔧 Real-World Engineering Challenge: Drone Gimbal Stabilization and Surgical Tool Orientation
+## Real-World Engineering Challenge: Drone Gimbal Stabilization and Surgical Tool Orientation
 
 <InArticleAd />
 
@@ -80,7 +84,7 @@ Euler angles (roll, pitch, yaw) are intuitive for small rotations and human comm
 - **Discontinuous motion** when switching between Euler angle branches
 - **Computational overhead** from re-orthogonalizing 3x3 matrices every control cycle
 
-## 📚 Fundamental Theory: Quaternion-Based Orientation
+## Fundamental Theory: Quaternion-Based Orientation
 
 <InArticleAd />
 
@@ -210,6 +214,12 @@ $$
 
 :::note[Quaternion Notation]
 A quaternion is often written as $\mathbf{q} = [w, \mathbf{v}]$ where $w$ is the scalar part and $\mathbf{v} = (x, y, z)$ is the vector part. Some libraries use the convention $[x, y, z, w]$ (scalar-last). Always check your library's convention. SciPy uses scalar-last: `[x, y, z, w]`.
+:::
+
+:::note[Hamilton vs JPL: Two Quaternion Conventions]
+The multiplication rules above ($\mathbf{i}\mathbf{j} = \mathbf{k}$, $\mathbf{i}\mathbf{j}\mathbf{k} = -1$) are the **Hamilton** convention. A second convention, commonly called **JPL** or **Shuster**, flips the sign of the cross-product term in quaternion multiplication and satisfies $\mathbf{i}\mathbf{j}\mathbf{k} = +1$. It survives mostly in aerospace attitude control (spacecraft, some IMU drivers).
+
+For robotics this distinction matters because most robotics libraries use Hamilton: SciPy `Rotation`, Eigen, ROS `tf2`, MoveIt, and Drake. If you pull quaternions from a spacecraft dataset or an older IMU driver, check which convention it uses; converting a JPL quaternion into a Hamilton library will give you the inverse rotation, silently. The rest of this lesson uses Hamilton throughout.
 :::
 
 ### Unit Quaternions and the Rotation Constraint
@@ -415,6 +425,29 @@ where $\Omega = \arccos(\mathbf{q}_0 \cdot \mathbf{q}_1)$ is the angle between t
 - If $\mathbf{q}_0 \cdot \mathbf{q}_1 \approx 1$, fall back to linear interpolation (LERP) followed by normalization to avoid division by near-zero
 - SLERP produces constant angular velocity, making it ideal for smooth robotic motion
 :::
+
+<Card title="Double-Cover in Practice: Always Check the Dot Product" icon="warning">
+The double-cover property ($\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation) is the single most common quaternion bug in practice. Interpolating between $\mathbf{q}_0$ and $-\mathbf{q}_0$ with SLERP produces a full rotation instead of staying still, because SLERP goes the long way around the hypersphere. `scipy.spatial.transform.Slerp` handles this internally, but if you implement SLERP yourself, you must guard against it:
+
+```python
+def slerp_safe(q0, q1, t):
+    # q0, q1 are np.array([x, y, z, w]), already unit quaternions
+    dot = np.dot(q0, q1)
+    if dot < 0.0:      # Take the shorter arc.
+        q1 = -q1
+        dot = -dot
+    if dot > 0.9995:   # Nearly identical: linear interpolation.
+        result = q0 + t * (q1 - q0)
+        return result / np.linalg.norm(result)
+    omega = np.arccos(dot)
+    s0 = np.sin((1 - t) * omega) / np.sin(omega)
+    s1 = np.sin(t * omega)       / np.sin(omega)
+    return s0 * q0 + s1 * q1
+```
+
+The same pattern applies to quaternion-based trajectory tracking: at every tick, check $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and negate the target if negative. Without this, the robot can "unwind" a full rotation between two otherwise close orientations.
+</Card>
+
 
 ```python
 import numpy as np
@@ -711,7 +744,7 @@ print("Key observation: SLERP maintains constant angular velocity (flat line)")
 print("Euler interpolation has variable speed and may produce unexpected paths")
 ```
 
-## 🎯 System Application: Quaternion-Based Gimbal Stabilization
+## System Application: Quaternion-Based Gimbal Stabilization
 
 <InArticleAd />
 
@@ -871,7 +904,7 @@ The mathematics is identical. The gimbal correction formula $\mathbf{q}_{\text{c
 
 </details>
 
-## 🛠️ Design Guidelines: Choosing Orientation Representations
+## Design Guidelines: Choosing Orientation Representations
 
 <InArticleAd />
 
@@ -887,7 +920,7 @@ Selecting the right orientation representation depends on your system requiremen
 
 4. **Store orientations as quaternions internally**, converting to other representations only at the interface layer. This prevents numerical drift and ensures singularity-free operation throughout the control pipeline.
 
-5. **Normalize quaternions** after every few multiplication operations to prevent drift from the unit hypersphere. A simple normalization $\mathbf{q} \leftarrow \mathbf{q} / \|\mathbf{q}\|$ is computationally cheap and maintains accuracy.
+5. **Normalize quaternions** regularly to prevent drift from the unit hypersphere. $\mathbf{q} \leftarrow \mathbf{q} / \|\mathbf{q}\|$ is computationally cheap. Concrete cadence: renormalize every control cycle in a high-frequency loop (100 Hz or faster), or whenever $|\|\mathbf{q}\|^2 - 1| > 0.01$. After a few hundred repeated multiplications without normalization, a unit quaternion can drift by several percent, and the resulting rotation becomes non-orthogonal.
 
 6. **Check the sign convention** when combining quaternion libraries. Since $\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation, always enforce $w \geq 0$ (or check dot product sign before SLERP) to avoid taking the long path around the hypersphere.
 </Steps>

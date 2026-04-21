@@ -1,11 +1,11 @@
 ---
-title: "Lesson 5: Trajectory Planning and Motion Control"
+title: "Trajectory Planning and Motion Control"
 description: "Plan smooth robot trajectories using polynomial interpolation, splines, and velocity profiles for pick-and-place and path following tasks"
 contributors: "sam-macharia,francis-maina,morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "trajectory-planning", "motion-control", "pick-and-place", "polynomial-interpolation", "spline", "velocity-profile", "path-planning"]
 excerpt: "Learn trajectory planning through warehouse mobile manipulator pick-and-place operations. Cover joint-space and task-space planning, polynomial and spline interpolation, trapezoidal velocity profiles, and complete pick-and-place task sequencing."
-heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+heroImage: "https://cdn.siliconwit.com/education/robotics/trajectory-planning-motion-control.png"
 ---
 
 import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
@@ -97,7 +97,7 @@ There are two fundamental approaches to planning a robot trajectory. Joint-space
 </TabItem>
 <TabItem label="Task-Space Planning">
 
-**How it works:** Given start pose $\mathbf{x}_0$ and goal pose $\mathbf{x}_f$ in Cartesian space, interpolate position (and orientation using quaternion SLERP from Lesson 3), then solve inverse kinematics at each time step.
+**How it works:** Given start pose $\mathbf{x}_0$ and goal pose $\mathbf{x}_f$ in Cartesian space, interpolate position (and orientation using quaternion SLERP, covered in [Orientation and Quaternions](./orientation-quaternions)), then solve inverse kinematics at each time step.
 
 **Advantages:**
 - Full control over the Cartesian path (straight lines, arcs, or any desired shape)
@@ -321,6 +321,18 @@ $$
 If the required distance $\Delta q$ is too short to reach $v_{max}$ before deceleration must begin, the cruise phase vanishes ($t_c = 0$) and the profile becomes triangular. This occurs when $\Delta q < \frac{v_{max}^2}{a_{max}}$. In this case, the peak velocity reached is $v_{peak} = \sqrt{a_{max} \cdot \Delta q}$ and the total time is $t_f = 2\sqrt{\frac{\Delta q}{a_{max}}}$.
 :::
 
+<Card title="S-Curve Profiles: Adding a Jerk Limit" icon="information">
+A trapezoidal profile has discontinuous acceleration at four places (start of accel, start of cruise, start of decel, end of decel). Each jump is an instantaneous step in acceleration, which means **infinite jerk** ($\dddot{q}$). For delicate payloads (electronics, surgical tools, full cups of liquid) this is unacceptable: the sudden acceleration change feels like a hammer blow at the attachment.
+
+The fix is the **S-curve** (or seven-segment) profile, which adds constant-jerk ramps to each corner of the trapezoid. The velocity curve has a characteristic S shape at each end. You specify a third limit $j_{\max}$ alongside $v_{\max}$ and $a_{\max}$, and the profile smoothly ramps acceleration up to $a_{\max}$, cruises at constant $a$, ramps back to zero, cruises at $v_{\max}$, and mirrors the pattern for deceleration. Most industrial motion controllers (Siemens SIMATIC, Rockwell Kinetix, Beckhoff TwinCAT) ship with S-curve profile generators; implement one yourself only if you need custom behavior.
+</Card>
+
+<Card title="Beyond Trapezoidal: TOPP for Time-Optimal Paths" icon="rocket">
+The trapezoidal profile is time-optimal **for one joint at a time**. For a full robot following a Cartesian path, the binding constraint at each point along the path is usually a different joint (or a different axis of the task frame), and the joint velocity / acceleration / torque limits are themselves configuration-dependent. Computing a true time-optimal profile under all these constraints simultaneously is a classical problem solved by **Time-Optimal Path Parameterization** (TOPP).
+
+The current industrial standard is **TOPP-RA** (Pham & Pham, 2017): it discretizes the geometric path and solves a sequence of small linear programs to find the fastest possible time parameterization under joint-velocity, joint-acceleration, and optionally joint-torque bounds. You will find it in [toppra (Python)](https://hungpham2511.github.io/toppra/), [Drake](https://drake.mit.edu/), and as the `contopp` option in MATLAB's Robotics System Toolbox. If the question "how do I make this trajectory 10 percent faster without exceeding limits?" comes up, this is the tool.
+</Card>
+
 ### Spline Interpolation Through Multiple Waypoints
 
 When a trajectory must pass through multiple via points (for example, a sequence of shelf locations), we connect consecutive pairs with cubic polynomials and enforce continuity of position, velocity, and acceleration at each via point. This produces a cubic spline trajectory.
@@ -406,7 +418,7 @@ A common blending approach defines a blend radius $r$ around each via point. Wit
 
 ### Cartesian Straight-Line Motion
 
-For task-space segments (descent, lift, placement), we generate a straight line in Cartesian space and convert to joint trajectories using the Jacobian from Lesson 4.
+For task-space segments (descent, lift, placement), we generate a straight line in Cartesian space and convert to joint trajectories using the Jacobian, introduced in [Velocity Kinematics and the Jacobian](./velocity-kinematics-jacobian).
 
 Given a desired Cartesian velocity $\dot{\mathbf{x}}$, the required joint velocities are:
 
@@ -421,6 +433,17 @@ $$
 $$
 
 The trajectory is generated by discretizing the Cartesian path into small steps and solving IK (or using the resolved-rate method above) at each step.
+
+<Card title="What If the Cartesian Path Is Infeasible?" icon="warning">
+A straight line in Cartesian space can demand joint velocities above actuator limits, especially near the workspace boundary or near a singularity where small Cartesian motion requires large joint motion. Before executing a task-space trajectory, validate it by sweeping along the path at your planned speed, computing $\dot{\mathbf{q}} = J^{\dagger} \dot{\mathbf{x}}$ at each step, and checking that every joint stays within `[-v_max, v_max]` and every acceleration stays within `[-a_max, a_max]`.
+
+If any step violates limits, you have three practical options:
+1. **Slow the trajectory globally**: reduce the Cartesian cruise velocity until the worst joint is within limits. Easy to implement, costs time.
+2. **Reparameterize using TOPP**: find the time-optimal speed profile along the fixed geometric path. Best if the path shape must be preserved.
+3. **Replan the path**: move the via points away from the singular region, sacrificing a straight line for a curved but feasible motion. Best when the Cartesian shape is flexible.
+
+Silently commanding unreachable velocities will either produce a tracking error (the robot falls behind) or trip the controller's safety limits and halt the motion mid-task.
+</Card>
 
 ### Python Implementation: Cubic Polynomial Trajectory
 

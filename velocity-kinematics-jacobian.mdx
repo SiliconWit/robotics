@@ -1,11 +1,11 @@
 ---
-title: "Lesson 4: Velocity Kinematics and the Jacobian"
+title: "Velocity Kinematics and the Jacobian"
 description: "Derive and apply the Jacobian matrix for velocity mapping, singularity detection, and manipulability analysis in collaborative robots"
 contributors: "sam-macharia,francis-maina,morris-wachira"
 pubDate: 2026-03-10
 tags: ["robotics", "jacobian-matrix", "velocity-kinematics", "singularity", "manipulability", "collaborative-robot", "pseudoinverse", "force-mapping"]
 excerpt: "Explore velocity kinematics through collaborative robot applications. Derive the Jacobian matrix, perform forward and inverse velocity mapping, detect singularities, analyze manipulability ellipsoids, and apply pseudoinverse methods for redundant manipulators."
-heroImage: "https://cdn.siliconwit.com/education/spatial-mechanics/spatial-rotations-transformations-lesson.png"
+heroImage: "https://cdn.siliconwit.com/education/robotics/velocity-kinematics-jacobian.png"
 ---
 
 import RoboticsComments from '../../../../components/robotics/RoboticsComments.astro';
@@ -26,7 +26,7 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 When a collaborative robot hands you a cup of coffee, it needs to move its end-effector smoothly through space at a controlled velocity. But the robot's motors operate in joint space, spinning individual joints at angular rates. The Jacobian matrix is the bridge between these two worlds, translating joint velocities into end-effector velocities and vice versa. It also reveals dangerous configurations where the robot loses the ability to move in certain directions, and it provides the mathematical foundation for force control in human-robot collaboration. #robotics #jacobian #velocity-kinematics
 
-## 🎯 Learning Objectives
+## Learning Objectives
 
 By the end of this lesson, you will be able to:
 
@@ -37,7 +37,7 @@ By the end of this lesson, you will be able to:
 5. **Apply** the pseudoinverse method for redundant manipulators <Badge text="Practical" variant="success" />
 6. **Map** end-effector forces to joint torques using the Jacobian transpose <Badge text="Force Control" variant="note" />
 
-## 🔧 Real-World Engineering Challenge: Collaborative Robot with Force-Limited Operation
+## Real-World Engineering Challenge: Collaborative Robot with Force-Limited Operation
 
 <InArticleAd />
 
@@ -70,7 +70,7 @@ In traditional industrial robots behind safety cages, singularity avoidance and 
 - **Force Safety**: Ensure end-effector forces stay within ISO/TS 15066 limits
 </Card>
 
-## 📚 Fundamental Theory
+## Fundamental Theory
 
 <InArticleAd />
 
@@ -109,6 +109,17 @@ where $\dot{\mathbf{q}}$ is the vector of joint velocities and $\dot{\mathbf{x}}
 :::note[Jacobian Dimensions]
 The Jacobian $J$ is an $m \times n$ matrix, where $m$ is the dimension of the task space and $n$ is the number of joints. For a planar 2R robot operating in 2D position space: $m = 2$, $n = 2$, so $J$ is $2 \times 2$. For a spatial 6-DOF robot with full position and orientation: $m = 6$, $n = 6$, so $J$ is $6 \times 6$.
 :::
+
+<Card title="Body vs Spatial Jacobian: Two Ways to Express Velocity" icon="information">
+When you move to 3D kinematics (and to any ROS or MoveIt codebase) you will encounter **two flavors** of the geometric Jacobian, differing only in the frame where end-effector twist is expressed:
+
+- **Spatial (world-frame) Jacobian $J_s$**: end-effector twist $\mathcal{V}_s = J_s \dot{\mathbf{q}}$ is in base / world coordinates. Natural for tracking a world-fixed target.
+- **Body (tool-frame) Jacobian $J_b$**: twist $\mathcal{V}_b = J_b \dot{\mathbf{q}}$ is in end-effector coordinates. Natural for tool-relative motion ("push 5 mm along the tool $z$").
+
+They are related by the $6 \times 6$ **adjoint** of the tool-to-base transform: $J_s = [\text{Ad}_{T_{sb}}] J_b$ and $J_b = [\text{Ad}_{T_{bs}}] J_s$. This is not simply $J_s R$, it includes position cross-product terms through the full adjoint matrix. Pick one convention per project and stick to it; silently mixing spatial and body twists is a common source of sign errors in 6-DOF control. Modern Robotics (Lynch & Park) and the `modern_robotics` Python library default to the body Jacobian; MoveIt and KDL expose both.
+
+Everything in this lesson's 2R example is planar, so the distinction collapses (the rotation between base and tool frame only changes orientation within the plane). It matters the moment you extend to 3D.
+</Card>
 
 ### Full Derivation: 2-Link Planar Robot (2R)
 
@@ -359,6 +370,17 @@ The singularity condition $\det(J) = 0$ occurs when $\sin\theta_2 = 0$, which me
 The absolute value $|\det(J)|$ provides a scalar measure of "closeness to singularity." When $|\det(J)|$ is large, the robot has good dexterity. As it approaches zero, joint velocities grow unbounded for finite task-space velocities. In practice, controllers set a threshold (e.g., $|\det(J)| < \epsilon$) and switch to damped least-squares methods near singularities.
 :::
 
+<Card title="Practical Singularity Thresholds" icon="warning">
+Unit-dependent measures like $|\det(J)|$ are fine for a single robot with known link lengths, but they do not transfer directly between robots of different sizes. For portable thresholds, use the dimensionless **condition number** $\kappa = \sigma_{\max} / \sigma_{\min}$ from the SVD. By convention:
+
+- $\kappa < 10$: isotropic, safe for full-speed operation
+- $\kappa \approx 100$: getting non-isotropic, one direction noticeably slower
+- $\kappa \approx 1000$: near-singular, activate damped least-squares
+- $\kappa > 10000$: effectively singular, reduce speed or replan
+
+For collaborative robots the damping typically ramps in around $\kappa \approx 100$ so the transition is smooth. Alternatively, use the smallest singular value directly: activate damping when $\sigma_{\min} < \sigma_{\text{threshold}}$, a common default being 5 to 10 percent of the robot's maximum reachable velocity at isotropic configurations.
+</Card>
+
 ### Manipulability Ellipsoids
 
 The manipulability ellipsoid provides a geometric visualization of the robot's velocity capability at any configuration. If all joints move at unit speed ($\|\dot{\mathbf{q}}\| \leq 1$), the set of achievable end-effector velocities forms an ellipsoid in task space. The shape and size of this ellipsoid reveal directional preferences and overall dexterity.
@@ -395,6 +417,10 @@ $$
 J^{\dagger} = J^T (J J^T)^{-1}
 $$
 
+:::note[Prefer SVD for Numerical Stability]
+The formula above is pedagogically clear but numerically poor near singularities, because $JJ^T$ becomes ill-conditioned. The standard, numerically stable way to compute the pseudoinverse is via the SVD: if $J = U \Sigma V^T$, then $J^{\dagger} = V \Sigma^{\dagger} U^T$, where $\Sigma^{\dagger}$ inverts the nonzero singular values and leaves small ones as zero (or clips them with a damping floor). In NumPy, call `np.linalg.pinv(J)`, which uses SVD internally; the `rcond` argument tunes the singular-value cutoff.
+:::
+
 The general solution to $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$ is:
 
 $$
@@ -428,6 +454,25 @@ The null space has dimension $n - m = 3 - 2 = 1$, meaning one DOF of internal mo
 - **Singularity avoidance:** Choose $\mathbf{z}$ to maximize $|\det(J J^T)|$
 - **Joint limit avoidance:** Choose $\mathbf{z}$ to push joints away from their limits
 - **Obstacle avoidance:** Choose $\mathbf{z}$ to move the elbow away from obstacles
+
+A concrete joint-limit avoidance example: for each joint, the gradient of a centering cost $H(\mathbf{q}) = \sum_i ((q_i - q_{i,\text{center}}) / (q_{i,\max} - q_{i,\min}))^2$ pushes that joint toward the middle of its range. Feed the negative gradient as $\mathbf{z}$ into the null-space term:
+
+```python
+def joint_limit_gradient(q, q_min, q_max):
+    """Gradient of the quadratic centering cost."""
+    center = (q_min + q_max) / 2
+    span   = (q_max - q_min) / 2
+    return 2 * (q - center) / span**2
+
+def redundant_ik_velocity(J, dx_desired, q, q_min, q_max, k_sec=1.0):
+    """Primary: track dx_desired. Secondary: center joints in their limits."""
+    J_pinv = np.linalg.pinv(J)
+    z      = -k_sec * joint_limit_gradient(q, q_min, q_max)
+    null   = (np.eye(len(q)) - J_pinv @ J) @ z
+    return J_pinv @ dx_desired + null
+```
+
+The primary task (end-effector velocity) is untouched because null-space motion is projected out of the task direction. Pick $k_{\text{sec}}$ small enough that the secondary term does not dominate the joint budget.
 
 ### Force and Torque Mapping
 
@@ -923,7 +968,7 @@ print(f"Average tracking error: {np.mean(tracking_error)*1000:.2f} mm")
 print(f"Minimum |det(J)| during motion: {np.min(np.abs(det_hist)):.4f}")
 ```
 
-## 🎯 System Application: Collaborative Robot Force Limiting
+## System Application: Collaborative Robot Force Limiting
 
 <InArticleAd />
 
@@ -980,7 +1025,7 @@ The force magnitude is $\|\mathbf{F}\| = 6.25$ N, well within the 150 N limit at
 As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without bound. The same joint torques that produce 6.25 N at $\theta_2 = 30°$ could produce hundreds of Newtons near full extension. This is why singularity monitoring is a safety requirement, not just a performance optimization.
 :::
 
-## 🛠️ Design Guidelines
+## Design Guidelines
 
 <InArticleAd />
 
@@ -1030,7 +1075,7 @@ As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without 
 "Design trajectories that stay well inside the workspace, where manipulability is high and force control is predictable." Planning paths that skirt workspace boundaries or pass near singularities saves reach but costs controllability and safety margin.
 :::
 
-## 📋 Summary
+## Summary
 
 <InArticleAd />
 
@@ -1048,7 +1093,7 @@ As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without 
 
 ### What Comes Next
 
-In Lesson 5, we will build on the Jacobian to plan smooth trajectories in both joint space and task space, using polynomial interpolation and velocity profiles to execute pick-and-place operations with the collaborative robot.
+Next, in [Trajectory Planning and Motion Control](./trajectory-planning-motion-control), we will build on the Jacobian to plan smooth trajectories in both joint space and task space, using polynomial interpolation and velocity profiles to execute pick-and-place operations with the collaborative robot.
 
 
 
