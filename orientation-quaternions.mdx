@@ -448,7 +448,6 @@ def slerp_safe(q0, q1, t):
 The same pattern applies to quaternion-based trajectory tracking: at every tick, check $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and negate the target if negative. Without this, the robot can "unwind" a full rotation between two otherwise close orientations.
 </Card>
 
-
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
