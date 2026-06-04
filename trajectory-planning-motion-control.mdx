@@ -957,6 +957,10 @@ Several strategies can reduce cycle time below 7 seconds:
 
 </details>
 
+:::tip[Instrument it]
+A planned trajectory is open-loop until the robot can measure what it actually did. Put an encoder on each joint (a magnetic AS5600, or an optical quadrature encoder) to track the following error between the planned and the real path, and sense each motor's current (an INA226 or ACS712) so a collision shows up as a torque spike. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) reads both, closes the loop, and can [stop the arm](https://siliconwit.io) the instant the current says it hit something.
+:::
+
 ## Design Guidelines
 
 <InArticleAd />
