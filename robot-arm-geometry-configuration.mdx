@@ -26,7 +26,7 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 import PodcastEmbed from '../../../../components/PodcastEmbed.astro';
 
-Every robot arm is a chain of rigid links connected by joints. The geometry of these links, the types of joints connecting them, and the way they are arranged together determine what a robot can and cannot do. This lesson introduces the structural building blocks of robot arms, analyzes how different configurations produce different workspace shapes, and compares the most common industrial robot architectures used in manufacturing today. #robotics #robot-arm #workspace-analysis
+A factory buys a robot arm, bolts it to the floor, and then finds that its hand stops 20 mm short of one station, or cannot reach a tray that sits close to its own base. No program can repair that. The lengths of the links and the kinds of joints decide where the hand can go. This lesson shows how to read the geometry of an arm, work out the region its hand can reach, and choose between the four common industrial arm types before anyone pays for hardware. #robotics #robot-arm #workspace-analysis
 
 <PodcastEmbed src="https://open.spotify.com/episode/3y45zu1iGT434RTiAxP9Py?si=L8R4ZYi4Rw-b3OsXHvhdjw" />
 
@@ -46,19 +46,19 @@ By the end of this lesson, you will be able to:
 <InArticleAd />
 
 
-A consumer electronics factory needs to automate the transfer of circuit boards between three stations: a solder reflow oven, an optical inspection camera, and a packaging tray. The boards arrive on a conveyor at a fixed height, pass through inspection at a raised platform, and must be placed into trays arranged in a grid pattern below. Cycle time is 4 seconds per board, and the cell footprint is limited to a 1.2 m by 1.2 m floor area. The engineering team must select a robot configuration that can reach all three stations within the space constraints while maintaining the required speed and precision.
+An electronics factory wants a robot to move circuit boards between three stations: the conveyor that brings boards out of the solder oven, an inspection camera on a raised platform, and a packaging tray at a lower level. The robot has 4 seconds for each board, and the whole cell (the robot with its stations) must fit on a floor area of 1.2 m by 1.2 m. The team must choose a robot type that reaches all three stations and is fast enough.
 
 :::note[Critical Design Questions]
-- What workspace shape does each station layout require?
-- Which robot configuration fits the footprint and reach requirements?
-- How do joint limits affect the usable portion of the workspace?
-- What is the minimum number of degrees of freedom needed for this task?
-- How do link lengths affect cycle time and precision?
+- How far from the robot base is each station, and what shape of region must the hand cover?
+- Which robot type fits the floor area and the reach?
+- How do the limits of each joint reduce the region the hand can use?
+- What is the smallest number of independent motions the task needs?
+- How do the link lengths change the reach?
 :::
 
 ### Why This Problem Matters for Configuration Selection
 
-Choosing the wrong robot configuration for a cell layout is one of the most expensive mistakes in automation. A 6-DOF articulated arm might seem like the safe choice for any task, but it could be slower, more expensive, and harder to program than a SCARA robot for this particular application. The geometry of the task, the shape of the required workspace, and the motion constraints all point toward specific configurations. Understanding arm geometry lets you make this selection with confidence before committing to hardware.
+The wrong robot type is an expensive mistake, because it is found after the robot is installed. An arm with six joints looks like the safe choice, but for this cell it would cost more and move more slowly than a simpler arm. The task itself tells you which type to choose.
 
 ## Fundamental Theory: Robot Arm Structure
 
@@ -67,47 +67,31 @@ Choosing the wrong robot configuration for a cell layout is one of the most expe
 
 ### Links and Joints: The Building Blocks
 
-A robot arm is a kinematic chain of rigid bodies called links, connected by joints that allow controlled relative motion between adjacent links. The first link is the base (fixed to the ground or a mounting surface), and the last link carries the end-effector (gripper, tool, or sensor). Every joint adds one or more degrees of freedom to the chain, and every link defines a geometric offset between the joints at its two ends.
+In your own arm, the upper arm and the forearm are stiff parts, and the shoulder and the elbow let them turn. A robot arm is built the same way. The stiff parts are called links, and the moving connections between them are called joints. The first link is the base, fixed to the floor. The last link carries the end-effector, the tool at the end of the arm: a gripper, a welding torch or a sensor. This lesson also calls it the hand.
+
+Each joint gives the arm one or more degrees of freedom (DOF). One degree of freedom is one independent way to move, such as one turn or one slide.
 
 <Card title="Link Parameters" icon="document">
-Each link in a robot arm is characterized by two geometric properties:
+Every joint turns about, or slides along, a line called its axis. Two numbers describe the link between two neighbouring joint axes:
 
-- **Link length** ($a_i$): the distance between adjacent joint axes, measured along the common normal
-- **Link twist** ($\alpha_i$): the angle between adjacent joint axes, measured about the common normal
+- **Link length** ($a_i$, in metres): the length of the shortest line that joins the two axes. That line is called the common normal.
+- **Link twist** ($\alpha_i$, in degrees or radians): the angle between the two axes, seen when you look along the common normal.
 
-These parameters, along with the joint variable, fully describe the relative position and orientation of consecutive links. We will formalize this using Denavit-Hartenberg parameters in a later lesson.
+In a flat arm all the joint axes are parallel, so every twist is zero and only the lengths matter.
 </Card>
 
 :::note[Two Flavors of DH Exist]
-When you import DH tables from a real robot, you will quickly discover there are **two DH conventions** in use: the **classical** (original 1955) version and the **modified** (Craig 1986) version. They differ in where each link frame is attached (at the end of link $i$ versus at joint $i$) and in the order of the elementary transforms. Parameters with the same name can refer to different physical quantities. Manufacturers are inconsistent: KUKA, ABB, and Universal Robots publish tables that are not directly interchangeable. Always check which convention a table uses before feeding it into your FK code, otherwise you will get silently wrong poses. The next lesson picks one convention and uses it consistently.
+Robot makers publish these numbers in Denavit-Hartenberg (DH) tables, and two versions of the method are in use: classical and modified. A number with the same name can mean a different length or angle in each. [Forward and Inverse Kinematics](/education/robotics/forward-inverse-kinematics/) explains the method and the difference.
 :::
-
-```text
-  Link Parameters Between Two Joints
-
-     joint i-1 axis          joint i axis
-          |                       |
-          |                       |
-          |      link length      |
-          |<------- a_i -------->|
-          |                       |
-          +--- common normal ----+
-          |                       |
-          |   link twist = alpha_i
-          |   (angle between the
-          |    two joint axes,
-          |    measured about the
-          |    common normal)
-```
 
 ### Joint Types
 
-Joints constrain the relative motion between two links. The type of joint determines how many degrees of freedom it contributes and what kind of motion it allows. For a detailed treatment of joint classification, DOF counting with Grubler's formula, and 3D constraint analysis, see [Kinematic Joints and Degrees of Freedom](/education/spatial-mechanics/kinematic-joints-degrees-freedom/).
+A joint allows some motions between two links and blocks all the others. The number that says where a joint is at this moment (an angle or a distance) is called the joint variable. For the full method of counting degrees of freedom, see [Kinematic Joints and Degrees of Freedom](/education/spatial-mechanics/kinematic-joints-degrees-freedom/).
 
 <Tabs>
 <TabItem label="Revolute (R)">
 
-**Motion:** Pure rotation about a single axis
+**Motion:** Turning about one axis, as a door turns on its hinge
 
 **DOF contributed:** 1
 
@@ -115,47 +99,47 @@ Joints constrain the relative motion between two links. The type of joint determ
 
 **Characteristics:**
 - Most common joint type in industrial robots
-- Provides angular positioning
-- Compact design with high stiffness
-- Easily actuated by rotary motors
+- Compact and stiff
+- Driven directly by a rotary motor
 
-**Workspace contribution:** Each revolute joint sweeps an arc. Two revolute joints in series produce an annular (ring-shaped) workspace in the plane of rotation.
+**Workspace contribution:** One revolute joint moves the hand along an arc. Two revolute joints in a row let the hand cover a ring-shaped (annular) region in the plane.
+
+The joint cannot turn without limit. Its angle stays between a smallest and a largest value:
 
 $$\theta_{\min} \leq \theta \leq \theta_{\max}$$
 
 </TabItem>
 <TabItem label="Prismatic (P)">
 
-**Motion:** Pure translation along a single axis
+**Motion:** Sliding along one axis, as a drawer slides on its rails
 
 **DOF contributed:** 1
 
 **Joint variable:** Displacement $d$ (meters or millimeters)
 
 **Characteristics:**
-- Provides linear positioning
 - Used in Cartesian and gantry robots
 - High load capacity along the axis of motion
-- Requires linear actuators (ball screws, pneumatic cylinders, linear motors)
+- Needs a linear actuator (ball screw, pneumatic cylinder or linear motor)
 
-**Workspace contribution:** Each prismatic joint extends the workspace in a straight line along its axis.
+**Workspace contribution:** Each prismatic joint extends the workspace in a straight line along its axis, between the two ends of its travel:
 
 $$d_{\min} \leq d \leq d_{\max}$$
 
 </TabItem>
 <TabItem label="Spherical (S)">
 
-**Motion:** Rotation about three orthogonal axes through a single point
+**Motion:** Turning about three axes at right angles that meet in one point, as your shoulder does
 
 **DOF contributed:** 3
 
 **Characteristics:**
-- Equivalent to three intersecting revolute joints
-- Found in wrist mechanisms of industrial robots
-- Allows arbitrary orientation changes
-- Complex mechanical design
+- Equivalent to three revolute joints whose axes meet in one point
+- Found in the wrist of industrial robots
+- Points the tool in any direction
+- Hard to build
 
-**Workspace contribution:** A spherical joint alone does not translate the end-effector; it only changes orientation at a fixed point.
+**Workspace contribution:** A spherical joint does not move the end-effector to a new place. It only changes the direction the tool points.
 
 </TabItem>
 <TabItem label="Other Types">
@@ -164,11 +148,9 @@ $$d_{\min} \leq d \leq d_{\max}$$
 
 **Planar (E):** Translation in two directions + rotation normal to the plane (3 DOF)
 
-**Screw (H):** Coupled rotation and translation along the same axis (1 DOF, with a fixed pitch relating rotation to translation)
+**Screw (H):** Turning and sliding along the same axis, tied together as in a bolt in a nut (1 DOF). The slide $d$ equals the pitch $h$ (the advance for each radian of turn) times the angle $\theta$:
 
 $$d = h \cdot \theta$$
-
-where $h$ is the screw pitch.
 
 **Fixed:** No relative motion (0 DOF). Used for rigid connections and mounting.
 
@@ -177,27 +159,27 @@ where $h$ is the screw pitch.
 
 ### Degrees of Freedom
 
-The total degrees of freedom of a robot arm determine how many independent motions it can perform simultaneously. For a serial chain (no closed loops), the total DOF is simply the sum of the DOF contributed by each joint. A task in 3D space requires up to 6 DOF for full positioning and orientation control: 3 for position (x, y, z) and 3 for orientation (roll, pitch, yaw).
-
-For a serial manipulator with $n$ joints:
+The degrees of freedom of an arm are the number of independent motions it can make at the same time. In a serial arm, where the links follow one another in a single open chain, you add the degrees of freedom of the joints. With $n$ joints, where joint $i$ gives $f_i$ degrees of freedom:
 
 $$\text{DOF} = \sum_{i=1}^{n} f_i$$
 
-where $f_i$ is the number of degrees of freedom of joint $i$.
+A SCARA arm, for example, has three revolute joints and one prismatic joint: $1 + 1 + 1 + 1 = 4$ DOF.
+
+To put a tool at any place and point it in any direction in 3D space takes 6 DOF: 3 for the position $(x, y, z)$ and 3 for the direction (roll, pitch and yaw, the three turns of a ship or an aircraft).
 
 <CardGrid>
-<Card title="Under-actuated (DOF < 6)">
-Cannot reach arbitrary positions and orientations in 3D space. Sufficient for tasks constrained to a plane or requiring only position control.
+<Card title="Fewer than 6 DOF">
+The arm cannot reach every position with every tool direction. It is enough for work in a plane, or for work that needs position only.
 
 **Examples:** 2R planar arm (2 DOF), SCARA (4 DOF)
 </Card>
-<Card title="Fully-actuated (DOF = 6)">
-Can reach any reachable position with any feasible orientation. The minimum for general-purpose 3D manipulation.
+<Card title="Exactly 6 DOF">
+The arm can reach any position inside its range with any tool direction that its joints allow. This is the smallest number for general work in 3D.
 
 **Examples:** Standard 6R industrial arms (KUKA, ABB, FANUC)
 </Card>
-<Card title="Redundant (DOF > 6)">
-More DOF than required for the task. Extra DOF provide flexibility for obstacle avoidance, singularity avoidance, or optimization of secondary criteria.
+<Card title="Redundant (more than 6 DOF)">
+The arm has more DOF than the task needs. It can use the extra ones to keep its elbow away from an obstacle while the tool stays in place.
 
 **Examples:** 7-DOF collaborative robots, dual-arm systems
 </Card>
@@ -205,46 +187,58 @@ More DOF than required for the task. Extra DOF provide flexibility for obstacle 
 
 ### Link Lengths and Their Effects
 
-Link lengths directly control the size and shape of the robot's workspace. Longer links increase reach but reduce stiffness and payload capacity. Shorter links improve rigidity and precision but limit the work volume. The ratio between link lengths in a serial chain also affects the shape of the reachable workspace and the distribution of dexterous regions within it.
+The link lengths set the size and the shape of the region the hand can reach. Longer links reach further, but they bend more and carry less. Shorter links are stiffer and more exact, but they cover less space.
 
-For a planar 2R robot arm with link lengths $l_1$ and $l_2$:
+The simplest case is a planar 2R arm: two links that move in one flat plane, joined by two revolute joints. Call the link lengths $l_1$ and $l_2$, in metres. The hand is furthest from the base when the arm is stretched straight, and nearest when link 2 is folded back along link 1:
 
-- **Maximum reach:** $r_{\max} = l_1 + l_2$ (arm fully extended)
-- **Minimum reach:** $r_{\min} = |l_1 - l_2|$ (arm fully folded)
-- **Workspace shape:** Annular region between $r_{\min}$ and $r_{\max}$
+```text
+  Stretched: the hand is as far away as it can go
 
-When $l_1 = l_2$, the inner radius goes to zero and the workspace becomes a full disk (the arm can reach the base). When $l_1 \neq l_2$, a "hole" appears at the center.
+  base o=============o=========> hand
+       |<--- l1 ---->|<-- l2 -->|
+       |<--- r_max = l1 + l2 -->|
 
-$$r_{\min} = |l_1 - l_2|, \quad r_{\max} = l_1 + l_2$$
+  Folded: the hand is as near as it can come
+
+  base o=============o
+          hand <=====+
+       |<->|  r_min = |l1 - l2|
+```
+
+- **Maximum reach:** $r_{\max} = l_1 + l_2$
+- **Minimum reach:** $r_{\min} = |l_1 - l_2|$ (the bars mean "the difference, taken as a positive number")
+- **Workspace shape:** a ring (annulus) between the radius $r_{\min}$ and the radius $r_{\max}$
+
+With $l_1 = 0.5$ m and $l_2 = 0.3$ m, $r_{\max} = 0.5 + 0.3 = 0.8$ m and $r_{\min} = 0.5 - 0.3 = 0.2$ m. The hand cannot come closer to the base than 0.2 m, so a hole is left around the base. When $l_1 = l_2$ the hole closes and the workspace is a full disk.
 
 ### Workspace Analysis: Reachable vs. Dexterous
 
 <Card title="Workspace Definitions" icon="document">
-- **Reachable workspace:** The set of all points in space that the end-effector can reach with at least one orientation. This is the total volume the robot can access.
-- **Dexterous workspace:** The subset of the reachable workspace where the end-effector can achieve any arbitrary orientation. This is always smaller than or equal to the reachable workspace.
-- **Void zone:** Regions inside the reachable workspace boundary that the robot cannot access due to joint limits, self-collision, or mechanical interference.
+- **Reachable workspace:** every point the end-effector can reach in at least one tool direction. This is the whole region the robot can touch.
+- **Dexterous workspace:** the part of the reachable workspace where the end-effector can also point in any direction. It is never larger than the reachable workspace.
+- **Void zone:** a region inside the outer edge that the robot still cannot reach, because of the link lengths, the joint limits, or parts of the robot that would hit each other.
 </Card>
 
 :::note[Why dexterous workspace matters]
-In the pick-and-place problem, the robot may need to approach a circuit board from above (vertical orientation) and place it at an angle into a tray (tilted orientation). If a position lies within the reachable workspace but outside the dexterous workspace, the robot can reach it but cannot achieve the required orientation there.
+A robot may take a board from straight above and place it into a tray at an angle. At a point that is reachable but not dexterous, it reaches the tray and cannot hold the board at that angle.
 :::
 
 ### Joint Limits and Their Impact
 
-Real joints cannot rotate or translate indefinitely. Mechanical stops, cable routing, and safety considerations impose limits on every joint variable. These limits reduce the theoretical workspace to a smaller, sometimes oddly shaped, practical workspace. Joint limits also create configurations where the robot is near a boundary and has limited mobility in certain directions.
+A real joint cannot turn or slide without end. Mechanical stops, cables and safety rules limit every joint variable. These limits cut the ideal ring to a smaller region, often with an odd shape.
 
-For a 2R arm with joint limits $\theta_1 \in [\theta_{1,\min}, \theta_{1,\max}]$ and $\theta_2 \in [\theta_{2,\min}, \theta_{2,\max}]$:
+For a 2R arm where $\theta_1$ (the angle of link 1) and $\theta_2$ (the angle of link 2 measured from link 1) each have a smallest and a largest value:
 
-- If $\theta_1$ has a full 360° range, the workspace is rotationally symmetric
-- If $\theta_1$ is limited (e.g., $\pm$150°), the workspace becomes a sector of the annulus
-- If $\theta_2$ is limited, the inner and outer boundaries change shape
+- If $\theta_1$ can turn a full 360°, the workspace is the same all the way round the base
+- If $\theta_1$ is limited (for example to $\pm$150°), the workspace is a sector of the ring, like a cake with a slice removed
+- If $\theta_2$ is limited, the arm can no longer fold fully, and the hole around the base grows
 
 ## Common Robot Configurations
 
 <InArticleAd />
 
 
-Industrial robots come in several standard configurations, each designed for specific types of tasks. The configuration is defined by the sequence of joint types and the geometric arrangement of the links. Choosing the right configuration for a given application is one of the most important early decisions in robotic cell design.
+A configuration is the order of the joint types in an arm and the way its links are arranged. Industry uses four standard ones. Each is written as a row of letters, R for revolute and P for prismatic, starting at the base.
 
 <Tabs>
 <TabItem label="SCARA">
@@ -259,9 +253,9 @@ Industrial robots come in several standard configurations, each designed for spe
 
 **Key characteristics:**
 - Very fast horizontal motion
-- Rigid in the vertical direction (good for insertion tasks)
-- Compliant in the horizontal plane (absorbs alignment errors)
-- Compact footprint
+- Stiff in the vertical direction, so it can press a part straight down
+- Gives a little in the horizontal plane, so a part that is slightly out of line can still slide into its hole (this is the "selective compliance" of the name)
+- Small floor area
 
 **Typical applications:**
 - PCB component insertion
@@ -303,7 +297,7 @@ with vertical stroke $d_{\min} \leq z \leq d_{\max}$ from the prismatic joint.
 - Joints 1, 2, 3: "Arm" (positions the wrist center in space)
 - Joints 4, 5, 6: "Wrist" (orients the end-effector)
 
-When the last three joint axes intersect at a single point (spherical wrist), the inverse kinematics can be decoupled into position and orientation subproblems.
+In most of these arms the last three joint axes meet in one point, so the wrist acts as a spherical joint.
 
 </TabItem>
 <TabItem label="Delta">
@@ -328,10 +322,10 @@ When the last three joint axes intersect at a single point (spherical wrist), th
 - Sorting operations
 - 3D printing (some designs)
 
-**Speed advantage:** Because the heavy motors are mounted on the fixed base and only lightweight links move, delta robots can achieve accelerations of 10g or more, with cycle times under 0.5 seconds.
+**Speed advantage:** The heavy motors stay on the fixed base and only light links move. A delta robot can therefore accelerate at 10 g (ten times the acceleration of gravity) or more, with cycle times under 0.5 seconds.
 
 :::note[Parallel vs Serial Kinematics]
-Unlike SCARA, articulated, and Cartesian arms, a delta robot is a **parallel mechanism**: it has **closed kinematic loops** between base and end-effector. This changes the DOF analysis fundamentally. The simple "sum the joint DOFs" rule no longer applies; you must use Grubler's formula for closed chains (a delta has around 9 joints but only 3 DOF because most are passive). Forward and inverse kinematics are also inverted compared to serial arms: IK is easy (solve each leg independently), FK is hard (solve a system of three simultaneous nonlinear equations). This is why parallel-robot controllers look so different from serial ones. See [Kinematic Joints and Degrees of Freedom](/education/spatial-mechanics/kinematic-joints-degrees-freedom/) for the full DOF counting machinery.
+The other three types are serial: one open chain from base to hand. A delta robot is a **parallel mechanism**: several chains join the base to the hand and form closed loops. The rule "add the DOF of the joints" does not work for closed loops: a delta has many joints but only 3 DOF, because most of its joints have no motor and only follow.
 :::
 
 </TabItem>
@@ -359,11 +353,9 @@ Unlike SCARA, articulated, and Cartesian arms, a delta robot is a **parallel mec
 - Overhead gantry systems in warehouses
 - 3D printers (most common configuration)
 
-**Kinematic simplicity:** For a Cartesian robot, the forward kinematics is trivial:
+**Simple position calculation:** Each prismatic joint moves the hand along one axis and nothing else. The position of the hand is the three joint displacements $d_1$, $d_2$ and $d_3$, with no sines or cosines:
 
 $$x = d_1, \quad y = d_2, \quad z = d_3$$
-
-No trigonometric calculations are needed.
 
 </TabItem>
 </Tabs>
@@ -371,17 +363,17 @@ No trigonometric calculations are needed.
 ### Configuration Comparison
 
 <CardGrid>
-<Card title="Speed Champion: Delta">
-Accelerations up to 10g. Ideal when cycle time is the primary constraint and workspace volume is modest.
+<Card title="Fastest: Delta">
+Choose it when cycle time matters most and the work area is small.
 </Card>
-<Card title="Versatility Champion: Articulated 6R">
-Full 6-DOF capability with large, flexible workspace. The default choice when task requirements are complex or varied.
+<Card title="Most flexible: Articulated 6R">
+Choose it when the tool must point in many directions or the tasks vary.
 </Card>
-<Card title="Precision Assembly: SCARA">
-Fast horizontal motion with vertical rigidity. Purpose-built for insertion and assembly tasks in electronics.
+<Card title="Flat assembly: SCARA">
+Choose it for fast flat motion with a straight vertical push.
 </Card>
-<Card title="Heavy Loads: Cartesian/Gantry">
-Highest stiffness and payload capacity. Best for large workspaces, heavy payloads, or applications where kinematic simplicity matters.
+<Card title="Heavy loads: Cartesian/Gantry">
+Choose it for heavy loads and large rectangular areas.
 </Card>
 </CardGrid>
 
@@ -390,17 +382,27 @@ Highest stiffness and payload capacity. Best for large workspaces, heavy payload
 <InArticleAd />
 
 
-To build intuition about how link lengths and joint limits shape the workspace, let us compute and visualize the workspace of a planar 2R robot arm. The forward kinematics of a 2R arm maps joint angles to end-effector position, and by sweeping through all feasible joint angle combinations, we can trace the workspace boundary.
+A program can draw the workspace of a planar 2R arm. It needs one rule, called forward kinematics: where is the hand for a given pair of joint angles? The program applies it to many pairs of angles and marks every point.
 
 ### Forward Kinematics of a 2R Planar Arm
 
-The end-effector position $(x, y)$ for a 2R arm with link lengths $l_1$, $l_2$ and joint angles $\theta_1$, $\theta_2$:
+Walk from the base to the hand. Link 1 points at the angle $\theta_1$, measured counterclockwise from the $x$ axis. Link 2 is turned by $\theta_2$ from the direction of link 1, so it points at $\theta_1 + \theta_2$. A link of length $l$ that points at an angle $\phi$ moves you $l \cos\phi$ along $x$ and $l \sin\phi$ along $y$. Add the two links to get the hand position $(x, y)$, in metres:
 
 $$x = l_1 \cos(\theta_1) + l_2 \cos(\theta_1 + \theta_2)$$
 
 $$y = l_1 \sin(\theta_1) + l_2 \sin(\theta_1 + \theta_2)$$
 
+Take $l_1 = 0.30$ m, $l_2 = 0.27$ m, $\theta_1 = 54°$ and $\theta_2 = 53°$. Link 2 points at $54° + 53° = 107°$.
+
+$$x = 0.30 \cos 54° + 0.27 \cos 107° = 0.176 - 0.079 = 0.097 \text{ m}$$
+
+$$y = 0.30 \sin 54° + 0.27 \sin 107° = 0.243 + 0.258 = 0.501 \text{ m}$$
+
+The hand is 0.097 m to the right of the base and 0.501 m in front of it. This arm and these angles return when we solve the factory cell.
+
 ### Workspace Boundary Computation
+
+The first program draws three workspaces side by side. Expect a full disk of radius 0.8 m for equal links, a ring with a hole of radius 0.2 m for links of 0.5 m and 0.3 m, and a sector with a hole when the joints are limited.
 
 ```python
 import numpy as np
@@ -515,6 +517,8 @@ plot_workspace_comparison()
 
 ### Visualizing a Single Arm Configuration
 
+The second program draws one arm in five poses over its workspace. It uses `compute_2r_workspace` from the first program, so run them in the same file or session.
+
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -616,6 +620,8 @@ show_multiple_configurations()
 ```
 
 ### Comparing Robot Configurations
+
+The third program shows the four workspace shapes from above. It also needs `compute_2r_workspace`. The delta shape is a rough circle, not an exact calculation, and the articulated arm is shown only as its two main links seen from above.
 
 ```python
 import numpy as np
@@ -742,73 +748,64 @@ compare_configurations()
 <InArticleAd />
 
 
-Let us return to the circuit board handling cell and apply what we have learned about arm geometry and configuration selection. The three stations (reflow oven output, inspection camera, packaging tray) define the workspace requirements, and the footprint constraint limits our configuration choices.
+Now return to the circuit board cell. The positions of the three stations tell us how far the hand must reach, and the floor area limits the robot types we can use.
 
 ### Station Layout Analysis
 
+The robot base is at the centre of the cell. Each station is marked with its position $(x, y)$ in metres, measured from the base.
+
 ```text
-  Top View: 1.2 m x 1.2 m Cell Layout
-
-  y (m)
-  0.6 +-----------------------------------------------+
-      |                                               |
-  0.5 |            [Inspection Camera]                |
-      |              (0.10, 0.50)                     |
-  0.4 |                                               |
-      |  [Packaging Tray]                             |
-  0.3 |   (-0.30, 0.35)                              |
-      |                                               |
-  0.2 |                          [Conveyor Pickup]    |
-      |               (base)      (0.45, 0.15)       |
-  0.1 |                 +                              |
-      |              ROBOT                            |
-  0.0 |           (0.0, 0.0)                          |
-      |                                               |
- -0.1 |                                               |
-      |                                               |
-      +-----------------------------------------------+
-     -0.6                  0.0                     0.6  x (m)
-
-  Distances from base:
-    Conveyor:   0.47 m
-    Inspection: 0.51 m  (farthest, sets minimum reach)
-    Tray:       0.46 m
+  Top view of the 1.2 m x 1.2 m cell (x across, y up)
+  0.6 ┌────────────────────────────────────────────────┐
+      │                            x Inspection camera │
+  0.4 │            x                 (0.10, 0.50)      │
+      │      Tray (-0.30, 0.35)                        │
+  0.2 │                                 Conveyor x     │
+      │                                  (0.45, 0.15)  │
+  0.0 │                        o Robot base (0, 0)     │
+      │                                                │
+ -0.2 │                                                │
+      │                                                │
+ -0.4 │                                                │
+      │                                                │
+ -0.6 └────────────────────────────────────────────────┘
+     -0.6                     0.0                     0.6
 ```
 
 <Steps>
 1. **Map the station positions**
 
-   Place the robot base at the center of the 1.2 m x 1.2 m cell. The three stations are located at approximately:
-   - Conveyor pickup: (0.45, 0.15) m from base
-   - Inspection camera: (0.10, 0.50) m from base (raised platform)
-   - Packaging tray grid: (-0.30, 0.35) m from base (below base height)
+   Seen from above, the three stations are at about:
+   - Conveyor pickup: (0.45, 0.15) m
+   - Inspection camera: (0.10, 0.50) m (on a raised platform)
+   - Packaging tray: (-0.30, 0.35) m (lower than the robot base)
 
-   All three points must lie within the robot's reachable workspace.
+   All three points must lie inside the reachable workspace.
 
 2. **Calculate required reach**
 
-   Maximum distance from base to any station:
+   The distance of a point $(x, y)$ from the base is $r = \sqrt{x^2 + y^2}$, by Pythagoras:
 
-   $$r_{\max,\text{required}} = \sqrt{0.45^2 + 0.15^2} \approx 0.47 \text{ m (conveyor)}$$
+   $$r_{\text{conveyor}} = \sqrt{0.45^2 + 0.15^2} \approx 0.47 \text{ m}$$
 
    $$r_{\text{inspection}} = \sqrt{0.10^2 + 0.50^2} \approx 0.51 \text{ m}$$
 
    $$r_{\text{tray}} = \sqrt{0.30^2 + 0.35^2} \approx 0.46 \text{ m}$$
 
-   The inspection station is the farthest point, requiring at least 0.51 m reach.
+   The inspection camera is the farthest station, so the arm must reach at least 0.51 m.
 
 3. **Determine DOF requirements**
 
-   The task involves:
-   - Horizontal positioning (2 DOF)
-   - Vertical motion to pick up and place boards (1 DOF)
-   - Rotation to align board orientation (1 DOF)
+   The task needs:
+   - Motion across the floor plan, in $x$ and $y$ (2 DOF)
+   - Motion up and down to lift and place the boards (1 DOF)
+   - A turn about the vertical axis to line up each board (1 DOF)
 
-   Total: 4 DOF minimum. No arbitrary 3D orientation is needed.
+   The total is 4 DOF. The boards always stay flat, so the tool never has to tilt.
 
 4. **Select configuration**
 
-   With 4 DOF, horizontal planar motion, vertical pick-and-place, and a compact footprint requirement, the **SCARA** configuration is the clear choice.
+   The task needs 4 DOF, fast flat motion, a vertical stroke and a small floor area. The **SCARA** configuration gives exactly these.
 </Steps>
 
 ### SCARA Sizing for the Cell
@@ -816,23 +813,25 @@ Let us return to the circuit board handling cell and apply what we have learned 
 <details>
 <summary>**Link length selection and workspace verification**</summary>
 
-For a SCARA with links $l_1$ and $l_2$:
+The two horizontal links $l_1$ and $l_2$ of the SCARA must meet two conditions. Stretched, the arm must reach the inspection camera:
 
-$$l_1 + l_2 \geq 0.51 \text{ m (must reach inspection station)}$$
+$$l_1 + l_2 \geq 0.51 \text{ m}$$
 
-$$|l_1 - l_2| \text{ should be small to minimize the void zone}$$
+Folded, it must leave only a small hole around the base, so $|l_1 - l_2|$ should be small.
 
 **Selected dimensions:**
-- $l_1 = 0.30$ m, $l_2 = 0.25$ m
-- $r_{\max} = 0.55$ m (covers all stations with margin)
-- $r_{\min} = 0.05$ m (small void zone near the base)
-- Vertical stroke: 150 mm (sufficient for conveyor-to-tray height difference)
+- $l_1 = 0.30$ m, $l_2 = 0.27$ m
+- $r_{\max} = 0.30 + 0.27 = 0.57$ m. The margin over the farthest station is $(0.57 - 0.51) / 0.51 \approx 12\%$.
+- $r_{\min} = 0.30 - 0.27 = 0.03$ m (a small void zone at the base)
+- Vertical stroke: 150 mm, enough for the height difference between the conveyor and the tray
 
 **Verification:**
-- Conveyor (0.47 m): within reach (0.47 < 0.55)
-- Inspection (0.51 m): within reach (0.51 < 0.55)
-- Tray (0.46 m): within reach (0.46 < 0.55)
-- All stations outside void zone (all > 0.05 m)
+- Conveyor (0.47 m): within reach ($0.47 < 0.57$) ✅
+- Inspection (0.51 m): within reach ($0.51 < 0.57$) ✅
+- Tray (0.46 m): within reach ($0.46 < 0.57$) ✅
+- All stations are outside the void zone (all $> 0.03$ m) ✅
+
+This check uses reach only. A real choice must also check the joint limits from the maker's data sheet.
 
 </details>
 
@@ -840,13 +839,13 @@ $$|l_1 - l_2| \text{ should be small to minimize the void zone}$$
 
 <CardGrid>
 <Card title="Articulated 6R">
-Overkill for this task. 6 DOF when only 4 are needed. Higher cost, more complex programming, slower for simple horizontal pick-and-place motions.
+It has 6 DOF where the task needs 4. It costs more, takes longer to program, and is slower for flat pick-and-place motion.
 </Card>
 <Card title="Delta">
-Excellent speed, but limited workspace volume. With a 1.2 m cell and stations spread at 0.5 m from center, a delta robot would need very long arms, reducing its speed advantage.
+It is very fast, but its workspace is small. To cover stations 0.5 m from the centre it would need long arms, and long arms lose the speed advantage.
 </Card>
 <Card title="Cartesian">
-Could work, but the gantry structure would take significant overhead space. Also slower than SCARA for the cycle time requirement of 4 seconds per board.
+It could do the task, but its frame would fill the space above the cell, and it is slower than a SCARA for a cycle of 4 seconds per board.
 </Card>
 </CardGrid>
 
@@ -860,37 +859,37 @@ Could work, but the gantry structure would take significant overhead space. Also
 <Steps>
 1. **Start with the task DOF**
 
-   Count the independent motions the end-effector must perform. If only planar positioning is needed, 3 DOF suffices. If full 3D positioning and orientation are needed, 6 DOF is the minimum.
+   Count the independent motions the end-effector must make. A position and one angle in a plane need 3 DOF. Any position with any tool direction in 3D needs 6 DOF.
 
 2. **Match workspace shape to station layout**
 
-   SCARA and articulated arms produce annular workspaces. Cartesian robots produce rectangular workspaces. Delta robots produce dome-shaped volumes. Choose the shape that covers your stations most efficiently.
+   Seen from above, SCARA and articulated arms cover a ring, Cartesian robots a rectangle, and delta robots a dome. Choose the shape that covers your stations with the least waste.
 
 3. **Size links using the reach equation**
 
-   For serial arms: $r_{\max} = \sum l_i$ (all links extended). Ensure $r_{\max}$ exceeds the farthest station distance by at least 10% for margin.
+   For a serial arm, $r_{\max}$ is the sum of the link lengths. Make it at least 10% larger than the distance to the farthest station.
 
 4. **Check the void zone**
 
-   For 2R and SCARA: $r_{\min} = |l_1 - l_2|$. Ensure no stations lie within this radius. If they do, adjust link ratios.
+   For 2R and SCARA arms, no station may lie inside $r_{\min} = |l_1 - l_2|$.
 
 5. **Verify joint limits do not exclude stations**
 
-   Plot the actual workspace with joint limits applied. Confirm all stations and the paths between them lie within the feasible region.
+   Plot the workspace with the real joint limits. Every station, and the path between stations, must lie inside it.
 
 6. **Consider cycle time and payload**
 
-   Faster configurations (delta, SCARA) trade workspace volume for speed. Heavier payloads favor Cartesian or articulated designs with higher stiffness.
+   Delta and SCARA robots are fast but cover less space. Heavy loads need the stiffer Cartesian or articulated designs.
 </Steps>
 
 ### Common Design Pitfalls
 
 :::note[Avoid these mistakes]
-- **Oversizing DOF:** Using a 6-DOF arm for a 3-DOF task wastes cost and adds unnecessary complexity.
-- **Ignoring void zones:** Placing a station inside $r_{\min}$ means the robot can never reach it, regardless of joint angles.
-- **Neglecting joint limits:** A workspace diagram with unlimited joint ranges is misleading. Always apply real joint limits.
-- **Forgetting cable routing:** Joint limits exist partly because cables and hoses cannot twist indefinitely. Account for cable management in your joint range budget.
-- **Confusing reachable and dexterous workspace:** A point inside the reachable workspace is not guaranteed to be accessible with the required end-effector orientation.
+- **Too many DOF:** a 6-DOF arm for a 3-DOF task costs more and is harder to program.
+- **A station in the void zone:** no joint angles reach a station inside $r_{\min}$.
+- **No joint limits on the drawing:** a workspace drawn with unlimited joints is larger than the real one.
+- **Cables forgotten:** cables and hoses cannot twist without end. Plan their route with the joint ranges.
+- **Reachable taken as dexterous:** the hand may reach a point and still be unable to hold the tool at the needed angle.
 :::
 
 ## Summary
@@ -898,19 +897,17 @@ Could work, but the gantry structure would take significant overhead space. Also
 <InArticleAd />
 
 
-This lesson covered the structural foundations of robot arm design:
+1. **Links and joints** are the parts of every arm. A revolute joint turns, a prismatic joint slides, and each adds one degree of freedom.
 
-1. **Links and joints** form the building blocks. Revolute joints provide rotation, prismatic joints provide translation, and the combination defines the arm's motion capability.
+2. **Link lengths** set the reach. For a 2R arm, $r_{\max} = l_1 + l_2$ and $r_{\min} = |l_1 - l_2|$. Unequal links leave a hole around the base.
 
-2. **Link lengths** determine reach. For a 2R arm, $r_{\max} = l_1 + l_2$ and $r_{\min} = |l_1 - l_2|$. The link ratio controls the void zone size.
+3. **Joint limits** cut the ideal workspace to a smaller real one.
 
-3. **Joint limits** reduce the theoretical workspace to a practical workspace. Always design with real joint limits, not ideal full-rotation assumptions.
+4. **Four standard configurations** cover most industrial work: SCARA, articulated 6R, delta and Cartesian.
 
-4. **Four standard configurations** cover most industrial applications: SCARA for fast planar assembly, articulated 6R for general-purpose manipulation, delta for high-speed pick-and-place, and Cartesian for large rectangular workspaces.
+5. **Configuration selection** follows from the task: its DOF, the region to cover, the cycle time and the load.
 
-5. **Configuration selection** should be driven by task DOF, workspace shape, station layout, cycle time, and payload requirements.
-
-**What comes next:** [Forward and Inverse Kinematics](./forward-inverse-kinematics) formalizes the relationship between joint angles and end-effector position using the Denavit-Hartenberg convention, building the mathematical framework for precise robot motion control.
+**What comes next:** [Forward and Inverse Kinematics](/education/robotics/forward-inverse-kinematics/) turns joint angles into a hand position, and a wanted hand position back into joint angles.
 
 
 

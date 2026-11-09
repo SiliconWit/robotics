@@ -24,50 +24,52 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 
 
-When a collaborative robot hands you a cup of coffee, it needs to move its end-effector smoothly through space at a controlled velocity. But the robot's motors operate in joint space, spinning individual joints at angular rates. The Jacobian matrix is the bridge between these two worlds, translating joint velocities into end-effector velocities and vice versa. It also reveals dangerous configurations where the robot loses the ability to move in certain directions, and it provides the mathematical foundation for force control in human-robot collaboration. #robotics #jacobian #velocity-kinematics
+Ask a robot arm to move its hand in a slow, straight line while the arm is almost fully stretched, and a joint may have to spin faster than its motor can turn. The hand leaves the line, or the robot stops with a fault. Next to a person, the same poses can turn a small motor torque into a hard push. One matrix, the Jacobian, explains both. It converts joint speeds into the velocity of the hand and hand forces into joint torques, and it shows the poses where the arm loses a direction of motion. #robotics #jacobian #velocity-kinematics
 
 ## Learning Objectives
 
 By the end of this lesson, you will be able to:
 
-1. **Derive** the Jacobian matrix for serial robot manipulators Core Theory
-2. **Compute** forward and inverse velocity mappings between joint space and task space Analysis
-3. **Detect** singularities and interpret their physical meaning Critical
-4. **Visualize** manipulability ellipsoids using singular value decomposition Advanced
-5. **Apply** the pseudoinverse method for redundant manipulators Practical
-6. **Map** end-effector forces to joint torques using the Jacobian transpose Force Control
+1. **Derive** the Jacobian matrix for serial robot manipulators
+2. **Compute** forward and inverse velocity mappings between joint space and task space
+3. **Detect** singularities and interpret their physical meaning
+4. **Visualize** manipulability ellipsoids using singular value decomposition
+5. **Apply** the pseudoinverse method for redundant manipulators
+6. **Map** end-effector forces to joint torques using the Jacobian transpose
 
 ## Real-World Engineering Challenge: Collaborative Robot with Force-Limited Operation
 
 <InArticleAd />
 
 
-A collaborative robot on a manufacturing line must hand components to a human worker. Safety regulations (ISO/TS 15066) require that contact forces never exceed 150 N at the end-effector. The robot controller needs to continuously monitor how joint torques translate into end-effector forces, and it must detect configurations where the robot could inadvertently generate excessive forces due to mechanical advantage near singularities. The Jacobian matrix provides exactly this capability: it maps between joint-space quantities (velocities, torques) and task-space quantities (end-effector velocities, forces) in real time.
+A collaborative robot works beside people with no safety cage. On a production line, one must hand parts to a human worker. The technical specification ISO/TS 15066 gives the largest force a robot may put on each part of the human body. In this lesson we take one limit for the whole task: 150 N at the end-effector, the tool at the end of the arm.
+
+The motors act at the joints, but the limit is at the hand. The controller must know, at every moment, how joint speeds and joint torques appear at the hand, and in which poses a small torque gives a large force.
 
 ### System Challenge: Safe Velocity and Force Control
 
 **Critical Engineering Questions:**
 
 :::note[Questions to Answer in This Lesson]
-- How do we compute end-effector velocity from measured joint velocities?
-- Given a desired end-effector trajectory, what joint velocities are required?
-- At what configurations does the robot lose dexterity, and what happens physically?
-- How do we ensure that joint torques never produce unsafe end-effector forces?
-- For a redundant robot (more joints than task DOF), how do we choose among infinite solutions?
+- The joint speeds are measured. How fast, and in which direction, is the hand moving?
+- The hand must follow a given path. Which joint speeds does that need?
+- In which poses does the arm lose a direction of motion?
+- How do we make sure the joint torques never give an unsafe force at the hand?
+- How does a robot with more joints than the task needs choose among its many answers?
 :::
 
 ### Why the Jacobian Is Essential for Collaborative Robots
 
-In traditional industrial robots behind safety cages, singularity avoidance and force control are important but not safety-critical in the same way. Collaborative robots operate in shared workspaces with humans, so the consequences of uncontrolled motion or unexpected forces are immediate and potentially dangerous. The Jacobian provides the mathematical framework for: (1) real-time velocity monitoring to ensure smooth, predictable motion, (2) force limiting by mapping joint torques to end-effector forces, (3) singularity detection to prevent loss of control, and (4) manipulability analysis to plan paths through high-dexterity configurations.
+A robot inside a cage can make a sudden move and hurt nobody. Beside a person, a sudden move or an unexpected force is a danger at once.
 
 <Card title="Collaborative Robot Design Challenge" icon="rocket">
-**Design Goal:** Implement Jacobian-based velocity and force control for a collaborative 2R planar robot, with extensions to redundant 3R configurations.
+**Design Goal:** Control the velocity and the force of a collaborative robot with the Jacobian. The robot is a planar 2R arm: two links in one plane, joined by two revolute (turning) joints.
 
 **Key Requirements:**
-- **Velocity Mapping**: Compute end-effector velocity from joint rates in real time
-- **Trajectory Tracking**: Generate joint velocities for straight-line end-effector paths
-- **Singularity Monitoring**: Detect and avoid configurations where control degrades
-- **Force Safety**: Ensure end-effector forces stay within ISO/TS 15066 limits
+- **Velocity Mapping**: Find the velocity of the end-effector from the joint speeds
+- **Trajectory Tracking**: Find the joint speeds for a straight path of the end-effector
+- **Singularity Monitoring**: Detect the poses where the arm loses a direction of motion
+- **Force Safety**: Keep the force at the end-effector below 150 N
 </Card>
 
 ## Fundamental Theory
@@ -77,57 +79,48 @@ In traditional industrial robots behind safety cages, singularity avoidance and 
 
 ### What is the Jacobian?
 
-The Jacobian is a matrix of partial derivatives that describes how small changes in one set of variables produce changes in another set. In robotics, the Jacobian relates joint velocities to end-effector velocities. Think of it as a "gear ratio matrix" that changes with the robot's configuration.
-
-**Simple Analogies:**
+Turn one joint of an arm a little, and the hand moves a little. How far, and in which direction, depends on the pose of the arm. The Jacobian is the table that holds these answers: one column for each joint, and in it the motion of the hand for one unit of motion of that joint.
 
 <CardGrid>
   <Card title="Bicycle Gear Ratio" icon="seti:gear">
-    On a bicycle, the gear ratio determines how pedal rotation speed translates to wheel rotation speed. The Jacobian is the robotic equivalent, but instead of a single ratio, it is an entire matrix because the robot has multiple joints and the end-effector moves in multiple directions. And unlike a fixed gear ratio, the Jacobian changes as the robot moves.
+    On a bicycle, the gear ratio tells you how fast the wheel turns for a given speed of the pedals. The Jacobian does the same work for a robot: it tells you how fast the hand moves for given speeds of the joints.
   </Card>
-  <Card title="Puppet Strings" icon="pencil">
-    A puppeteer pulls strings (joint velocities) to make a puppet's hand move (end-effector velocity). The relationship between string pulls and hand motion depends on the puppet's current pose. Some poses make the hand easy to move in all directions; others make certain directions difficult or impossible. The Jacobian captures exactly this configuration-dependent relationship.
+  <Card title="Where the Comparison Stops" icon="pencil">
+    A gear ratio is one fixed number. The Jacobian is a table of numbers, because there are several joints and the hand moves in several directions. And it is not fixed: every entry changes as the arm changes its pose. In some poses a whole direction of motion disappears.
   </Card>
 </CardGrid>
 
 ### Mathematical Definition
 
-For a general $n$-DOF robot with forward kinematics $\mathbf{x} = f(\mathbf{q})$, where $\mathbf{q} \in \mathbb{R}^n$ is the joint variable vector and $\mathbf{x} \in \mathbb{R}^m$ is the task-space vector, the Jacobian matrix is defined as:
+Write the joint angles (radians) as a list $\mathbf{q} = (q_1, \dots, q_n)$, and the position of the end-effector as a list $\mathbf{x}$ of $m$ coordinates (metres). Forward kinematics is the rule $\mathbf{x} = f(\mathbf{q})$. The symbol $\partial f_1 / \partial q_2$ means "the change of the first coordinate for a small change of joint 2, with the other joints held still". The Jacobian collects all such rates:
 
 $$
 J(\mathbf{q}) = \frac{\partial f(\mathbf{q})}{\partial \mathbf{q}} = \begin{bmatrix} \frac{\partial f_1}{\partial q_1} & \frac{\partial f_1}{\partial q_2} & \cdots & \frac{\partial f_1}{\partial q_n} \\ \frac{\partial f_2}{\partial q_1} & \frac{\partial f_2}{\partial q_2} & \cdots & \frac{\partial f_2}{\partial q_n} \\ \vdots & \vdots & \ddots & \vdots \\ \frac{\partial f_m}{\partial q_1} & \frac{\partial f_m}{\partial q_2} & \cdots & \frac{\partial f_m}{\partial q_n} \end{bmatrix}
 $$
 
-The velocity relationship is then:
+A dot over a symbol means its rate of change with time. So $\dot{\mathbf{q}}$ is the list of joint speeds, in rad/s, and $\dot{\mathbf{x}}$ is the velocity of the end-effector, in m/s. Each joint adds its own share to the motion of the hand, and the shares add:
 
 $$
 \dot{\mathbf{x}} = J(\mathbf{q}) \, \dot{\mathbf{q}}
 $$
 
-where $\dot{\mathbf{q}}$ is the vector of joint velocities and $\dot{\mathbf{x}}$ is the end-effector velocity vector.
+In words: the velocity of the hand is the Jacobian times the joint speeds. The writing $J(\mathbf{q})$ is a reminder that the entries of $J$ depend on the pose.
 
 :::note[Jacobian Dimensions]
-The Jacobian $J$ is an $m \times n$ matrix, where $m$ is the dimension of the task space and $n$ is the number of joints. For a planar 2R robot operating in 2D position space: $m = 2$, $n = 2$, so $J$ is $2 \times 2$. For a spatial 6-DOF robot with full position and orientation: $m = 6$, $n = 6$, so $J$ is $6 \times 6$.
+$J$ has one row for each coordinate of the task and one column for each joint. For a planar 2R arm that controls a position $(x, y)$, $J$ is $2 \times 2$. For a 6-joint arm that controls position and tool direction in 3D, $J$ is $6 \times 6$.
 :::
 
 <Card title="Body vs Spatial Jacobian: Two Ways to Express Velocity" icon="information">
-When you move to 3D kinematics (and to any ROS or MoveIt codebase) you will encounter **two flavors** of the geometric Jacobian, differing only in the frame where end-effector twist is expressed:
-
-- **Spatial (world-frame) Jacobian $J_s$**: end-effector twist $\mathcal{V}_s = J_s \dot{\mathbf{q}}$ is in base / world coordinates. Natural for tracking a world-fixed target.
-- **Body (tool-frame) Jacobian $J_b$**: twist $\mathcal{V}_b = J_b \dot{\mathbf{q}}$ is in end-effector coordinates. Natural for tool-relative motion ("push 5 mm along the tool $z$").
-
-They are related by the $6 \times 6$ **adjoint** of the tool-to-base transform: $J_s = [\text{Ad}_{T_{sb}}] J_b$ and $J_b = [\text{Ad}_{T_{bs}}] J_s$. This is not simply $J_s R$, it includes position cross-product terms through the full adjoint matrix. Pick one convention per project and stick to it; silently mixing spatial and body twists is a common source of sign errors in 6-DOF control. Modern Robotics (Lynch & Park) and the `modern_robotics` Python library default to the body Jacobian; MoveIt and KDL expose both.
-
-Everything in this lesson's 2R example is planar, so the distinction collapses (the rotation between base and tool frame only changes orientation within the plane). It matters the moment you extend to 3D.
+For later work in 3D: the velocity of the tool can be written in the frame of the robot base (the **spatial** Jacobian) or of the tool (the **body** Jacobian). Mixing them causes sign errors. In the planar examples here the choice makes no difference.
 </Card>
 
 ### Full Derivation: 2-Link Planar Robot (2R)
 
-Let us derive the Jacobian step by step for a 2R planar robot with link lengths $L_1$ and $L_2$, and joint angles $\theta_1$ and $\theta_2$.
+Now build the Jacobian for a planar 2R arm with link lengths $L_1$ and $L_2$ (metres) and joint angles $\theta_1$ and $\theta_2$.
 
 #### Step 1: Forward Kinematics Equations
 
-The end-effector position $(x, y)$ in terms of the joint angles is:
+The position $(x, y)$ of the end-effector, from [Forward and Inverse Kinematics](/education/robotics/forward-inverse-kinematics/), is:
 
 $$
 x = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)
@@ -137,11 +130,11 @@ $$
 y = L_1 \sin\theta_1 + L_2 \sin(\theta_1 + \theta_2)
 $$
 
-Here, $\theta_1$ is measured from the positive $x$-axis, and $\theta_2$ is the relative angle of link 2 with respect to link 1.
+Here $\theta_1$ is measured counterclockwise from the $x$ axis, and $\theta_2$ is the turn of link 2 away from the direction of link 1.
 
 #### Step 2: Compute Partial Derivatives
 
-We need four partial derivatives to build the $2 \times 2$ Jacobian.
+The $2 \times 2$ Jacobian needs four rates of change: each of $x$ and $y$, for a small change of each of $\theta_1$ and $\theta_2$. Use the rules that the derivative of $\cos u$ is $-\sin u$ and the derivative of $\sin u$ is $\cos u$.
 
 **Partial derivatives of $x$:**
 
@@ -166,7 +159,7 @@ $$
 <details>
 <summary>**Detailed differentiation walkthrough**</summary>
 
-Consider $x = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)$. Differentiating with respect to $\theta_1$: the first term gives $-L_1 \sin\theta_1$ by the chain rule. The second term gives $-L_2 \sin(\theta_1 + \theta_2) \cdot 1$ because $\theta_1$ appears inside $(\theta_1 + \theta_2)$. Now differentiating with respect to $\theta_2$: the first term $L_1 \cos\theta_1$ has no $\theta_2$ dependence, so it vanishes. The second term gives $-L_2 \sin(\theta_1 + \theta_2) \cdot 1$. The same logic applies to the $y$ equations using derivatives of $\sin$.
+Take $x = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)$. For a change of $\theta_1$: the first term gives $-L_1 \sin\theta_1$, and the second gives $-L_2 \sin(\theta_1 + \theta_2)$, because $\theta_1$ is inside $(\theta_1 + \theta_2)$. For a change of $\theta_2$: the first term has no $\theta_2$ in it and gives zero, and the second gives $-L_2 \sin(\theta_1 + \theta_2)$. The $y$ equation follows the same way.
 
 </details>
 
@@ -178,56 +171,60 @@ $$
 J(\theta_1, \theta_2) = \begin{bmatrix} -L_1 \sin\theta_1 - L_2 \sin(\theta_1 + \theta_2) & -L_2 \sin(\theta_1 + \theta_2) \\ L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2) & L_2 \cos(\theta_1 + \theta_2) \end{bmatrix}
 $$
 
-For notational convenience, let $s_1 = \sin\theta_1$, $c_1 = \cos\theta_1$, $s_{12} = \sin(\theta_1 + \theta_2)$, $c_{12} = \cos(\theta_1 + \theta_2)$:
+To write less, let $s_1 = \sin\theta_1$, $c_1 = \cos\theta_1$, $s_{12} = \sin(\theta_1 + \theta_2)$ and $c_{12} = \cos(\theta_1 + \theta_2)$:
 
 $$
 J = \begin{bmatrix} -L_1 s_1 - L_2 s_{12} & -L_2 s_{12} \\ L_1 c_1 + L_2 c_{12} & L_2 c_{12} \end{bmatrix}
 $$
 
-The velocity mapping equation becomes:
+The velocity $(\dot{x}, \dot{y})$ of the end-effector is then:
 
 $$
 \begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix} = \begin{bmatrix} -L_1 s_1 - L_2 s_{12} & -L_2 s_{12} \\ L_1 c_1 + L_2 c_{12} & L_2 c_{12} \end{bmatrix} \begin{bmatrix} \dot{\theta}_1 \\ \dot{\theta}_2 \end{bmatrix}
 $$
+
+Column 1 is the velocity of the hand when joint 1 alone turns at 1 rad/s: the whole arm swings about the base. Column 2 is the velocity of the hand when joint 2 alone turns at 1 rad/s: only link 2 swings, about the elbow. The real velocity is column 1 times $\dot{\theta}_1$ plus column 2 times $\dot{\theta}_2$.
 
 ### Forward and Inverse Velocity Mapping
 
 <Tabs>
 <TabItem label="Forward Velocity Mapping">
 
-**Problem:** Given joint velocities $\dot{\theta}_1$ and $\dot{\theta}_2$, find end-effector velocity $(\dot{x}, \dot{y})$.
+**Problem:** The joint speeds $\dot{\theta}_1$ and $\dot{\theta}_2$ are known. Find the velocity $(\dot{x}, \dot{y})$ of the end-effector.
 
-**Method:** Direct matrix multiplication.
+**Method:** Multiply.
 
 $$
 \dot{\mathbf{x}} = J(\mathbf{q}) \, \dot{\mathbf{q}}
 $$
 
-This is always straightforward because the Jacobian is computed from the current configuration $\mathbf{q}$ and the multiplication is a simple linear operation.
+This always has an answer, in every pose.
 
-**When to use:** Monitoring the actual end-effector velocity from measured joint encoder rates. This is critical for collaborative robots to verify that the end-effector is not moving too fast near a human worker.
+**When to use:** To find the real velocity of the end-effector from the joint speeds that the encoders (the angle sensors on the joints) measure. A collaborative robot uses it to check that the hand is not moving too fast near a person.
 
 </TabItem>
 <TabItem label="Inverse Velocity Mapping">
 
-**Problem:** Given a desired end-effector velocity $(\dot{x}, \dot{y})$, find the required joint velocities $\dot{\theta}_1$ and $\dot{\theta}_2$.
+**Problem:** The wanted velocity $(\dot{x}, \dot{y})$ of the end-effector is known. Find the joint speeds $\dot{\theta}_1$ and $\dot{\theta}_2$ that give it.
 
-**Method:** Solve the linear system by inverting the Jacobian (when it is square and non-singular).
+**Method:** Undo the multiplication with the inverse matrix $J^{-1}$.
 
 $$
 \dot{\mathbf{q}} = J^{-1}(\mathbf{q}) \, \dot{\mathbf{x}}
 $$
 
-For the 2R robot, the inverse of the $2 \times 2$ Jacobian is:
+For the 2R arm, the inverse of the $2 \times 2$ Jacobian is:
 
 $$
 J^{-1} = \frac{1}{\det(J)} \begin{bmatrix} L_2 c_{12} & L_2 s_{12} \\ -L_1 c_1 - L_2 c_{12} & -L_1 s_1 - L_2 s_{12} \end{bmatrix}
 $$
 
-**When to use:** Trajectory tracking, where you specify a desired path in task space (such as a straight line) and need to compute the corresponding joint velocities at each time step.
+Here $\det(J)$ is the determinant of $J$, one number made from its four entries: the product of the two entries on the main diagonal minus the product of the other two.
+
+**When to use:** To follow a path. You give the path of the hand (a straight line, for example), and at each time step this gives the joint speeds to command.
 
 :::note[Critical Warning]
-The inverse $J^{-1}$ only exists when $\det(J) \neq 0$. At singularities, $\det(J) = 0$ and the inverse mapping breaks down, meaning no finite joint velocities can produce certain end-effector velocities.
+The inverse divides by $\det(J)$, so it exists only when $\det(J) \neq 0$. A pose with $\det(J) = 0$ is called a singularity. There, some velocities of the hand cannot be produced by any joint speeds.
 :::
 
 </TabItem>
@@ -235,7 +232,7 @@ The inverse $J^{-1}$ only exists when $\det(J) \neq 0$. At singularities, $\det(
 
 ### Numerical Example
 
-Let us work through a complete numerical example to solidify the concepts. Consider a 2R robot with $L_1 = 1.0$ m, $L_2 = 0.8$ m, at configuration $\theta_1 = 45°$, $\theta_2 = 30°$. The joints are moving at $\dot{\theta}_1 = 2.0$ rad/s and $\dot{\theta}_2 = -1.0$ rad/s.
+Take a 2R arm with $L_1 = 1.0$ m and $L_2 = 0.8$ m, in the pose $\theta_1 = 45°$, $\theta_2 = 30°$. The joints turn at $\dot{\theta}_1 = 2.0$ rad/s and $\dot{\theta}_2 = -1.0$ rad/s.
 
 <Steps>
 
@@ -252,13 +249,13 @@ Let us work through a complete numerical example to solidify the concepts. Consi
    $$
 
    $$
-   J = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9141 & 0.2071 \end{bmatrix}
+   J = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9142 & 0.2071 \end{bmatrix}
    $$
 
 3. **Forward velocity mapping:**
 
    $$
-   \begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix} = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9141 & 0.2071 \end{bmatrix} \begin{bmatrix} 2.0 \\ -1.0 \end{bmatrix}
+   \begin{bmatrix} \dot{x} \\ \dot{y} \end{bmatrix} = \begin{bmatrix} -1.4798 & -0.7727 \\ 0.9142 & 0.2071 \end{bmatrix} \begin{bmatrix} 2.0 \\ -1.0 \end{bmatrix}
    $$
 
    $$
@@ -266,7 +263,7 @@ Let us work through a complete numerical example to solidify the concepts. Consi
    $$
 
    $$
-   \dot{y} = (0.9141)(2.0) + (0.2071)(-1.0) = 1.8282 - 0.2071 = 1.621 \text{ m/s}
+   \dot{y} = (0.9142)(2.0) + (0.2071)(-1.0) = 1.8284 - 0.2071 = 1.621 \text{ m/s}
    $$
 
    The end-effector speed is $\|\dot{\mathbf{x}}\| = \sqrt{(-2.187)^2 + (1.621)^2} = 2.72$ m/s.
@@ -274,56 +271,56 @@ Let us work through a complete numerical example to solidify the concepts. Consi
 4. **Compute the determinant:**
 
    $$
-   \det(J) = (-1.4798)(0.2071) - (-0.7727)(0.9141)
+   \det(J) = (-1.4798)(0.2071) - (-0.7727)(0.9142)
    $$
 
    $$
-   \det(J) = -0.3065 + 0.7064 = 0.3999
+   \det(J) = -0.3065 + 0.7064 \approx 0.4000
    $$
+
+   The exact value follows from the closed form $\det(J) = L_1 L_2 \sin\theta_2 = (1.0)(0.8)(0.5) = 0.4000$. The four-digit entries above give $0.3999$; the difference is rounding only.
 
    Since $\det(J) \neq 0$, the robot is not at a singularity and the inverse velocity mapping is well-defined.
 
 5. **Inverse velocity example:** Suppose we want $\dot{x} = 0.5$ m/s, $\dot{y} = 0.0$ m/s (pure horizontal motion). Then:
 
    $$
-   \begin{bmatrix} \dot{\theta}_1 \\ \dot{\theta}_2 \end{bmatrix} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9141 & -1.4798 \end{bmatrix} \begin{bmatrix} 0.5 \\ 0.0 \end{bmatrix}
+   \begin{bmatrix} \dot{\theta}_1 \\ \dot{\theta}_2 \end{bmatrix} = \frac{1}{0.4000} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9142 & -1.4798 \end{bmatrix} \begin{bmatrix} 0.5 \\ 0.0 \end{bmatrix}
    $$
 
    $$
-   \dot{\theta}_1 = \frac{(0.2071)(0.5)}{0.3999} = 0.259 \text{ rad/s}
+   \dot{\theta}_1 = \frac{(0.2071)(0.5)}{0.4000} = 0.259 \text{ rad/s}
    $$
 
    $$
-   \dot{\theta}_2 = \frac{(-0.9141)(0.5)}{0.3999} = -1.143 \text{ rad/s}
+   \dot{\theta}_2 = \frac{(-0.9142)(0.5)}{0.4000} = -1.143 \text{ rad/s}
    $$
 
 </Steps>
 
 :::note[Physical Interpretation]
-To move the end-effector horizontally to the right at 0.5 m/s from this configuration, joint 1 must rotate slowly counterclockwise (0.259 rad/s) while joint 2 must rotate clockwise more rapidly (-1.143 rad/s). The ratio of joint speeds depends entirely on the current configuration through the Jacobian.
+To move the end-effector to the right at 0.5 m/s from this pose, joint 1 turns slowly counterclockwise (0.259 rad/s) and joint 2 turns faster clockwise (-1.143 rad/s). In another pose the same motion needs other joint speeds.
 :::
 
 ### Singularity Analysis
 
-Singularities are configurations where the Jacobian loses rank, meaning the robot cannot generate end-effector velocities in certain directions regardless of how fast the joints move. Detecting and avoiding singularities is essential for safe robot operation.
+Stretch your own arm out fully and try to move your fingertip further away: you cannot, however hard your shoulder and elbow work. A singularity of a robot is the same thing: a pose in which the two columns of $J$ point along one line, so the joints can move the hand along that line only. The other direction is lost, at any joint speed.
 
 #### Determinant of the Jacobian
 
-For the 2R robot, the determinant is:
+The determinant measures how far the two columns are from lying on one line, and it is zero when they do. For the 2R arm:
 
 $$
 \det(J) = (-L_1 s_1 - L_2 s_{12})(L_2 c_{12}) - (-L_2 s_{12})(L_1 c_1 + L_2 c_{12})
 $$
 
-Expanding and simplifying using the identity $\sin A \cos B - \cos A \sin B = \sin(A - B)$:
-
-$$
-\det(J) = L_1 L_2 (s_{12} c_1 - s_1 c_{12}) = L_1 L_2 \sin(\theta_1 + \theta_2 - \theta_1)
-$$
+Multiplying out, the terms with $L_2^2$ cancel and a sine identity leaves one short result (the steps follow below):
 
 $$
 \boxed{\det(J) = L_1 L_2 \sin\theta_2}
 $$
+
+Only the elbow angle $\theta_2$ appears. Turning joint 1 turns the whole arm and does not change how close it is to a singularity.
 
 <details>
 <summary>**Step-by-step determinant simplification**</summary>
@@ -348,86 +345,85 @@ The singularity condition $\det(J) = 0$ occurs when $\sin\theta_2 = 0$, which me
 <Tabs>
 <TabItem label="Fully Extended (theta2 = 0)">
 
-**Configuration:** Both links are collinear, pointing in the same direction.
+**Configuration:** The two links lie on one straight line and point the same way.
 
-**Physical meaning:** The end-effector is at the maximum reach $r = L_1 + L_2$. At this boundary, the robot cannot move radially outward because it is already fully stretched. Both joints can only produce tangential (circular) motion. One degree of freedom in task space is lost.
+**Physical meaning:** The end-effector is at the largest reach, $r = L_1 + L_2$. Each joint can only swing it sideways, across the arm. It cannot move along the arm, toward the base or away from it.
 
-**Consequence for collaborative robots:** Near full extension, even small radial velocity demands require extremely large joint velocities, which is dangerous. The controller must slow down or redirect the trajectory well before reaching this configuration.
+**Consequence for collaborative robots:** Near this pose, even a slow motion of the hand along the arm needs very high joint speeds. The controller must slow the motion or change the path before the arm is straight.
 
 </TabItem>
 <TabItem label="Fully Folded (theta2 = 180)">
 
-**Configuration:** Link 2 folds back on link 1, so the end-effector is at minimum reach $r = |L_1 - L_2|$.
+**Configuration:** Link 2 is folded back along link 1, so the end-effector is at the smallest reach, $r = |L_1 - L_2|$.
 
-**Physical meaning:** The robot is at its inner workspace boundary. Similar to the extended case, radial motion toward the base is impossible. If $L_1 = L_2$, the end-effector reaches the base and the entire arm collapses to a point, losing all directional control.
+**Physical meaning:** As in the stretched pose, the hand cannot move along the arm. If $L_1 = L_2$, the hand lies on the base, and joint 1 cannot move it at all.
 
-**Consequence for collaborative robots:** Folded configurations can cause rapid, unpredictable accelerations when the robot tries to "unfold." Force monitoring must be especially vigilant near these poses.
+**Consequence for collaborative robots:** An arm that leaves a folded pose can accelerate suddenly.
 
 </TabItem>
 </Tabs>
 
 :::note[Singularity and the Determinant Value]
-The absolute value $|\det(J)|$ provides a scalar measure of "closeness to singularity." When $|\det(J)|$ is large, the robot has good dexterity. As it approaches zero, joint velocities grow unbounded for finite task-space velocities. In practice, controllers set a threshold (e.g., $|\det(J)| < \epsilon$) and switch to damped least-squares methods near singularities.
+The size $|\det(J)|$ says how close the arm is to a singularity. For this arm it is largest at $\theta_2 = \pm 90°$. Below a chosen threshold, controllers change to a safer formula called damped least squares, which limits the joint speeds and accepts a small error of the hand.
 :::
 
 <Card title="Practical Singularity Thresholds" icon="warning">
-Unit-dependent measures like $|\det(J)|$ are fine for a single robot with known link lengths, but they do not transfer directly between robots of different sizes. For portable thresholds, use the dimensionless **condition number** $\kappa = \sigma_{\max} / \sigma_{\min}$ from the SVD. By convention:
+The value of $|\det(J)|$ depends on the link lengths, so a threshold for one robot does not fit a larger one. A measure with no units is the **condition number** $\kappa$: the speed of the hand in its easiest direction divided by its speed in the hardest direction (defined in the next part). A rule of thumb, to be tuned for each robot:
 
-- $\kappa < 10$: isotropic, safe for full-speed operation
-- $\kappa \approx 100$: getting non-isotropic, one direction noticeably slower
-- $\kappa \approx 1000$: near-singular, activate damped least-squares
-- $\kappa > 10000$: effectively singular, reduce speed or replan
-
-For collaborative robots the damping typically ramps in around $\kappa \approx 100$ so the transition is smooth. Alternatively, use the smallest singular value directly: activate damping when $\sigma_{\min} < \sigma_{\text{threshold}}$, a common default being 5 to 10 percent of the robot's maximum reachable velocity at isotropic configurations.
+- $\kappa < 10$: the hand moves well in every direction
+- $\kappa \approx 100$: one direction is clearly slower. Begin to add damping.
+- $\kappa \approx 1000$: near a singularity. Use damped least squares.
+- $\kappa > 10000$: singular in practice. Reduce speed or plan another path.
 </Card>
 
 ### Manipulability Ellipsoids
 
-The manipulability ellipsoid provides a geometric visualization of the robot's velocity capability at any configuration. If all joints move at unit speed ($\|\dot{\mathbf{q}}\| \leq 1$), the set of achievable end-effector velocities forms an ellipsoid in task space. The shape and size of this ellipsoid reveal directional preferences and overall dexterity.
+One picture shows what the hand can do in a pose. Give the joints a fixed budget of speed: every pair of joint speeds with $\dot{\theta}_1^2 + \dot{\theta}_2^2 \leq 1$. Mark every hand velocity this budget can give. The marks fill an ellipse (in 3D, an ellipsoid), long in the directions where the hand moves easily and thin where it does not. It is called the manipulability ellipsoid.
 
-The ellipsoid is determined by the **singular value decomposition (SVD)** of the Jacobian:
+The axes of the ellipse come from the **singular value decomposition (SVD)** of the Jacobian, which splits any matrix into a turn, a stretch along fixed axes, and another turn:
 
 $$
 J = U \Sigma V^T
 $$
 
-where $\Sigma = \text{diag}(\sigma_1, \sigma_2, \ldots)$ contains the singular values, $U$ defines the principal directions in task space, and $V$ defines the principal directions in joint space.
+The matrix $\Sigma$ holds the stretch factors $\sigma_1, \sigma_2, \ldots$, called the singular values, largest first.
 
 **Key properties:**
-- The **semi-axes** of the ellipsoid have lengths equal to the singular values $\sigma_1, \sigma_2, \ldots$
-- The **directions** of the semi-axes are the columns of $U$
-- The **manipulability index** is $w = \sigma_1 \cdot \sigma_2 \cdot \ldots = |\det(J)|$ (for square Jacobians)
-- The **condition number** $\kappa = \sigma_{\max} / \sigma_{\min}$ measures isotropy ($\kappa = 1$ is perfectly isotropic)
+- The **half-lengths of the axes** are the singular values, and their directions are the columns of $U$
+- The **manipulability index** is $w = \sigma_1 \cdot \sigma_2 \cdots = |\det(J)|$ for a square Jacobian. It is proportional to the area of the ellipse.
+- The **condition number** $\kappa = \sigma_{\max} / \sigma_{\min}$ compares the long axis to the short one. $\kappa = 1$ is a circle: every direction is equally easy (isotropic).
+
+In the numerical example, $\sigma_1 = 1.90$ and $\sigma_2 = 0.21$. Their product is $0.40 = \det(J)$ ✅, and $\kappa = 1.90 / 0.21 \approx 9$. The hand moves nine times more easily in its best direction than in its worst.
 
 <Card title="Interpreting the Manipulability Ellipsoid" icon="information">
-**Large, circular ellipsoid:** The robot can move the end-effector equally well in all directions. This is the ideal configuration for collaborative tasks.
+**Large and round:** the hand moves equally well in all directions. This is the best pose for work beside a person.
 
-**Elongated ellipsoid:** The robot moves easily along the major axis but poorly along the minor axis. The task should be oriented along the major axis if possible.
+**Long and thin:** arrange the task so that its motion lies along the long axis.
 
-**Degenerate (flat) ellipsoid:** One singular value is near zero, indicating proximity to a singularity. The robot effectively loses one DOF. Avoid this configuration.
+**Flat:** the arm is near a singularity. Avoid this pose.
 </Card>
 
 ### Pseudoinverse for Redundant Robots
 
-When a robot has more joints than task-space dimensions (e.g., a 3R planar robot controlling 2D position), the system is redundant. There are infinitely many joint velocity solutions for any desired end-effector velocity. The Moore-Penrose pseudoinverse provides the minimum-norm solution, and the null space allows additional objectives like singularity avoidance or joint limit avoidance.
+Put a fingertip on the table and keep it there. You can still move your elbow. Your arm has more joints than the task needs, and a robot of that kind is called redundant. The simplest example is a planar arm with three joints (3R) that controls only the position $(x, y)$. It has many possible sets of joint speeds for one hand velocity, and $J$ is not square, so it has no ordinary inverse.
 
-For a redundant robot with $m \times n$ Jacobian ($n > m$), the pseudoinverse is:
+The Moore-Penrose pseudoinverse $J^{\dagger}$ chooses the set with the smallest joint speeds overall. With $J^T$ the transpose of $J$ (rows and columns exchanged):
 
 $$
 J^{\dagger} = J^T (J J^T)^{-1}
 $$
 
 :::note[Prefer SVD for Numerical Stability]
-The formula above is pedagogically clear but numerically poor near singularities, because $JJ^T$ becomes ill-conditioned. The standard, numerically stable way to compute the pseudoinverse is via the SVD: if $J = U \Sigma V^T$, then $J^{\dagger} = V \Sigma^{\dagger} U^T$, where $\Sigma^{\dagger}$ inverts the nonzero singular values and leaves small ones as zero (or clips them with a damping floor). In NumPy, call `np.linalg.pinv(J)`, which uses SVD internally; the `rcond` argument tunes the singular-value cutoff.
+This formula loses accuracy near a singularity. Programs find the pseudoinverse from the SVD: in NumPy, call `np.linalg.pinv(J)`.
 :::
 
-The general solution to $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$ is:
+The other sets of joint speeds differ from this one by motions that leave the hand still, like the elbow in the fingertip example. These motions are called the null space of $J$. All solutions of $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$ are:
 
 $$
 \dot{\mathbf{q}} = J^{\dagger} \dot{\mathbf{x}} + (I - J^{\dagger} J) \mathbf{z}
 $$
 
-where $\mathbf{z} \in \mathbb{R}^n$ is an arbitrary vector, and $(I - J^{\dagger} J)$ projects it onto the null space of $J$.
+Here $I$ is the identity matrix and $\mathbf{z}$ is any list of joint speeds you would like to have. The factor $(I - J^{\dagger} J)$ keeps only the part of $\mathbf{z}$ that does not move the hand.
 
 **3-Link Planar Robot Example:**
 
@@ -449,13 +445,9 @@ $$
 
 where $c_{123} = \cos(\theta_1 + \theta_2 + \theta_3)$ and $s_{123} = \sin(\theta_1 + \theta_2 + \theta_3)$.
 
-The null space has dimension $n - m = 3 - 2 = 1$, meaning one DOF of internal motion can reconfigure the arm without moving the end-effector. This extra freedom is used for:
+The arm has $n = 3$ joints and the task has $m = 2$ coordinates, so $n - m = 1$ free motion is left: the arm can change its shape in one way while the end-effector stays still. Through its choice of $\mathbf{z}$, the controller uses this freedom for a second aim: to stay away from singularities, from joint limits or from an obstacle.
 
-- **Singularity avoidance:** Choose $\mathbf{z}$ to maximize $|\det(J J^T)|$
-- **Joint limit avoidance:** Choose $\mathbf{z}$ to push joints away from their limits
-- **Obstacle avoidance:** Choose $\mathbf{z}$ to move the elbow away from obstacles
-
-A concrete joint-limit avoidance example: for each joint, the gradient of a centering cost $H(\mathbf{q}) = \sum_i ((q_i - q_{i,\text{center}}) / (q_{i,\max} - q_{i,\min}))^2$ pushes that joint toward the middle of its range. Feed the negative gradient as $\mathbf{z}$ into the null-space term:
+An example for joint limits: give each joint a cost that grows with its distance from the middle of its range, $H(\mathbf{q}) = \sum_i ((q_i - q_{i,\text{center}}) / (q_{i,\max} - q_{i,\min}))^2$. The slope (gradient) of $H$ points toward higher cost, so the program uses the opposite direction as $\mathbf{z}$:
 
 ```python
 def joint_limit_gradient(q, q_min, q_max):
@@ -472,33 +464,35 @@ def redundant_ik_velocity(J, dx_desired, q, q_min, q_max, k_sec=1.0):
     return J_pinv @ dx_desired + null
 ```
 
-The primary task (end-effector velocity) is untouched because null-space motion is projected out of the task direction. Pick $k_{\text{sec}}$ small enough that the secondary term does not dominate the joint budget.
+The end-effector velocity does not change, because the second term contains only motions that leave the hand still. Keep the gain $k_{\text{sec}}$ small, so that this second aim does not use most of the joint speed.
 
 ### Force and Torque Mapping
 
-The Jacobian also relates end-effector forces to joint torques through the principle of virtual work. If the end-effector exerts a force $\mathbf{F}$ on the environment, the required joint torques $\boldsymbol{\tau}$ are given by the Jacobian transpose.
+The same matrix connects forces. Suppose the arm is still and the end-effector pushes on something with a force $\mathbf{F}$, in newtons. Each motor must hold a torque, and $\boldsymbol{\tau}$ is the list of these joint torques, in N·m. The rule comes from power: torque times joint speed at the joints equals force times velocity at the hand, if friction is ignored. With $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$ this gives:
 
 $$
 \boldsymbol{\tau} = J^T(\mathbf{q}) \, \mathbf{F}
 $$
 
-This relationship is the dual of the velocity mapping. While velocity maps forward through $J$, force maps backward through $J^T$.
+Velocity goes from the joints to the hand through $J$. Force goes from the hand back to the joints through the transpose $J^T$.
 
 <Card title="Force Mapping for Collaborative Safety" icon="warning">
-**ISO/TS 15066 Compliance:**
+**Keeping below the force limit:**
 
-Given a maximum allowable end-effector force $F_{\max} = 150$ N, the controller must ensure:
+To find the force at the hand from measured joint torques, invert the rule. With the largest allowed force $F_{\max} = 150$ N, the controller must keep:
 
 $$\|J^{-T} \boldsymbol{\tau}\| \leq F_{\max}$$
 
-Or equivalently, limit joint torques such that the resulting end-effector force stays safe. Near singularities, small joint torques can produce large end-effector forces along certain directions, making force monitoring especially critical.
+Here $J^{-T}$ is the inverse of $J^T$, and the double bars mean the size of the force. Near a singularity, a small joint torque can give a large force in the direction the arm cannot move. A straight leg works the same way: with the knee locked it holds your weight with almost no effort from the muscles.
 </Card>
 
 :::note[Duality Between Velocity and Force]
-The velocity and force mappings are transposes of each other. A direction of high velocity capability (large singular value) corresponds to a direction of low force capability, and vice versa. This is the robotic equivalent of the mechanical advantage principle: you cannot have both high speed and high force in the same direction.
+A direction in which the hand can move fast is a direction in which it can push only weakly, as with the long end of a lever. No pose gives both high speed and high force in one direction.
 :::
 
 ### Python Code: Jacobian Computation and Velocity Mapping
+
+The first program repeats the numerical example. It prints the same Jacobian, a hand velocity of (-2.187, 1.621) m/s with a speed of 2.722 m/s, $\det(J) = 0.4000$, and joint speeds of 0.259 and -1.143 rad/s for the horizontal motion.
 
 ```python
 import numpy as np
@@ -599,6 +593,8 @@ print(f"Verification: dx = {dx_check[0]:.3f}, dy = {dx_check[1]:.3f}")
 
 ### Python Code: Singularity Detection Across Configurations
 
+The second program colours every pair of joint angles by $|\det(J)|$. The picture is made of horizontal bands, because $\det(J)$ depends only on $\theta_2$. The largest value, $1.0 \times 0.8 = 0.8$, is at $\theta_2 = \pm 90°$.
+
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -664,6 +660,8 @@ singularity_map(L1=1.0, L2=0.8)
 ```
 
 ### Python Code: Manipulability Ellipsoid Visualization
+
+The third program draws the arm and its ellipse in four poses. Expect a broad ellipse at $\theta_2 = 90°$ and an almost flat one at $\theta_2 = 10°$ and at $\theta_2 = 170°$.
 
 ```python
 import numpy as np
@@ -779,6 +777,13 @@ plot_manipulability(L1, L2, configs, scale=0.3)
 
 ### Python Code: Straight-Line Motion Using the Jacobian
 
+The fourth program moves the hand along a straight line from (1.2, 0.5) m to (0.4, 1.0) m in 2 seconds. At each time step it finds the joint speeds with the inverse Jacobian, then moves the joints by speed times time step (resolved-rate control). The hand speeds up at the start and slows down at the end.
+
+Two points help when you read it:
+
+- It prints a "tracking error" of about 77 mm at most. That number compares the hand with a point that moves along the line at constant speed, so nearly all of it is a difference in timing. The hand stays within about 1.3 mm of the line.
+- The option `elbow_down=True` in `ik_2r` selects $\theta_2 > 0$. For the start point this puts the elbow below the line from base to hand, which is the elbow-down pose.
+
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
@@ -884,19 +889,20 @@ p_start = np.array([1.2, 0.5])
 p_end = np.array([0.4, 1.0])
 
 # Compute initial joint angles using inverse kinematics (geometric)
-def ik_2r(x, y, L1, L2, elbow_up=True):
+def ik_2r(x, y, L1, L2, elbow_down=True):
     """Inverse kinematics for 2R planar robot."""
     r2 = x**2 + y**2
     cos_t2 = (r2 - L1**2 - L2**2) / (2 * L1 * L2)
     cos_t2 = np.clip(cos_t2, -1, 1)
-    if elbow_up:
+    # elbow_down=True gives theta2 > 0: the elbow sits below the line from base to hand.
+    if elbow_down:
         t2 = np.arctan2(np.sqrt(1 - cos_t2**2), cos_t2)
     else:
         t2 = np.arctan2(-np.sqrt(1 - cos_t2**2), cos_t2)
     t1 = np.arctan2(y, x) - np.arctan2(L2*np.sin(t2), L1 + L2*np.cos(t2))
     return np.array([t1, t2])
 
-q_start = ik_2r(p_start[0], p_start[1], L1, L2, elbow_up=True)
+q_start = ik_2r(p_start[0], p_start[1], L1, L2, elbow_down=True)
 
 # Run simulation
 t_hist, q_hist, p_hist, det_hist = straight_line_trajectory(
@@ -973,56 +979,66 @@ print(f"Minimum |det(J)| during motion: {np.min(np.abs(det_hist)):.4f}")
 <InArticleAd />
 
 
-Now let us apply everything we have learned to the original collaborative robot challenge. The robot must track a handoff trajectory while continuously monitoring that end-effector forces remain within the 150 N safety limit specified by ISO/TS 15066.
+The collaborative robot must follow the path of the handover and keep the force at the end-effector below 150 N. This loop runs in the robot's own controller, many times each second.
 
 ### Force-Limited Trajectory Execution
 
-The control loop at each time step:
+At each time step the controller does this:
 
 <Steps>
 
-1. **Measure** the current joint angles $\mathbf{q}$ from encoders and joint torques $\boldsymbol{\tau}$ from torque sensors.
+1. **Measure** the joint angles $\mathbf{q}$ with the encoders and the joint torques $\boldsymbol{\tau}$ with the torque sensors.
 
-2. **Compute the Jacobian** $J(\mathbf{q})$ for the current configuration.
+2. **Compute the Jacobian** $J(\mathbf{q})$ for the present pose.
 
-3. **Estimate end-effector force** using $\mathbf{F} = J^{-T} \boldsymbol{\tau}$. If $\|\mathbf{F}\| > F_{\max}$, reduce joint torques proportionally.
+3. **Estimate the force at the end-effector** with $\mathbf{F} = J^{-T} \boldsymbol{\tau}$. If its size is above $F_{\max}$, reduce all joint torques by the same factor.
 
-4. **Check singularity proximity** via $|\det(J)|$. If below threshold, activate damped least-squares and reduce speed.
+4. **Check for a singularity** with $|\det(J)|$. If it is below the threshold, change to damped least squares and reduce speed.
 
-5. **Compute desired joint velocities** via $\dot{\mathbf{q}} = J^{-1} \dot{\mathbf{x}}_{\text{desired}}$ (or pseudoinverse for redundant robots).
+5. **Compute the joint speeds** for the wanted hand velocity: $\dot{\mathbf{q}} = J^{-1} \dot{\mathbf{x}}_{\text{desired}}$ (the pseudoinverse for a redundant robot).
 
-6. **Clamp joint velocities** to respect actuator limits and safety speed constraints.
+6. **Limit the joint speeds** to what the motors and the safety rules allow.
 
-7. **Command** the clamped joint velocities to the motor controllers.
+7. **Send** the limited joint speeds to the motor drives.
 
 </Steps>
 
 ### Force Monitoring Example
 
-For our 2R robot at the numerical example configuration ($\theta_1 = 45°$, $\theta_2 = 30°$), suppose the joint torques are $\tau_1 = 10$ Nm and $\tau_2 = 5$ Nm. The end-effector force is:
+Take the 2R arm in the pose of the numerical example ($\theta_1 = 45°$, $\theta_2 = 30°$), with measured joint torques $\tau_1 = 10$ N·m and $\tau_2 = 5$ N·m. The force at the end-effector is:
 
 $$
 \mathbf{F} = J^{-T} \boldsymbol{\tau} = (J^{-1})^T \boldsymbol{\tau}
 $$
 
-Using the Jacobian inverse computed earlier:
+Take the inverse Jacobian from the numerical example and exchange its rows and columns:
 
 $$
-J^{-1} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9141 & -1.4798 \end{bmatrix}
-$$
-
-$$
-(J^{-1})^T = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & -0.9141 \\ 0.7727 & -1.4798 \end{bmatrix}
+J^{-1} = \frac{1}{0.4000} \begin{bmatrix} 0.2071 & 0.7727 \\ -0.9142 & -1.4798 \end{bmatrix}
 $$
 
 $$
-\mathbf{F} = \frac{1}{0.3999} \begin{bmatrix} 0.2071 & -0.9141 \\ 0.7727 & -1.4798 \end{bmatrix} \begin{bmatrix} 10 \\ 5 \end{bmatrix} = \begin{bmatrix} -6.25 \\ -0.14 \end{bmatrix} \text{ N}
+(J^{-1})^T = \frac{1}{0.4000} \begin{bmatrix} 0.2071 & -0.9142 \\ 0.7727 & -1.4798 \end{bmatrix}
 $$
 
-The force magnitude is $\|\mathbf{F}\| = 6.25$ N, well within the 150 N limit at this configuration.
+$$
+\mathbf{F} = \frac{1}{0.4000} \begin{bmatrix} 0.2071 & -0.9142 \\ 0.7727 & -1.4798 \end{bmatrix} \begin{bmatrix} 10 \\ 5 \end{bmatrix} = \begin{bmatrix} -6.25 \\ 0.82 \end{bmatrix} \text{ N}
+$$
+
+Row by row:
+
+$$
+F_x = \frac{0.2071 \times 10 - 0.9142 \times 5}{0.4000} = \frac{-2.500}{0.4000} = -6.25 \text{ N}
+$$
+
+$$
+F_y = \frac{0.7727 \times 10 - 1.4798 \times 5}{0.4000} = \frac{0.328}{0.4000} = 0.82 \text{ N}
+$$
+
+The size of the force is $\|\mathbf{F}\| = \sqrt{6.25^2 + 0.82^2} = 6.30$ N, far below the 150 N limit in this pose ✅
 
 :::note[Near-Singularity Force Amplification]
-As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without bound. The same joint torques that produce 6.25 N at $\theta_2 = 30°$ could produce hundreds of Newtons near full extension. This is why singularity monitoring is a safety requirement, not just a performance optimization.
+As the arm stretches ($\theta_2 \to 0°$), $\det(J)$ falls to zero and the entries of $J^{-T}$ grow without limit. The same two torques give 6.3 N at $\theta_2 = 30°$, 9.1 N at $10°$, 15.4 N at $5°$ and 71.8 N at $1°$. Watching for singularities is a matter of safety.
 :::
 
 ## Design Guidelines
@@ -1032,24 +1048,16 @@ As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without 
 
 <CardGrid>
   <Card title="Jacobian Computation" icon="seti:gear">
-    **Practice:** Compute the Jacobian symbolically first, then implement numerically. Verify against finite-difference approximations during development.
-
-    **Frequency:** The Jacobian must be recomputed at every control cycle (typically 1 kHz for collaborative robots).
+    Derive the Jacobian as a formula, then program it. Check the program against small test moves of each joint. Compute it again in every control cycle (typically 1 kHz for collaborative robots).
   </Card>
   <Card title="Singularity Management" icon="warning">
-    **Detection:** Monitor $|\det(J)|$ or the minimum singular value $\sigma_{\min}$.
-
-    **Response:** Use damped least-squares ($\lambda = 0.01$ to $0.1$) near singularities. Reduce speed. Never allow the robot to pass through a singularity at full speed.
+    Watch $|\det(J)|$ or the smallest singular value. Near a singularity, use damped least squares ($\lambda = 0.01$ to $0.1$) and reduce speed.
   </Card>
   <Card title="Redundancy Exploitation" icon="puzzle">
-    **When available:** Use the null space for secondary objectives such as joint limit avoidance, singularity avoidance, or obstacle avoidance.
-
-    **Priority:** Primary task (end-effector motion) always takes precedence. Null-space motion must not interfere with the primary task.
+    Use the null space for a second aim: joint limits, singularities or obstacles. The motion of the end-effector always comes first.
   </Card>
   <Card title="Force Safety" icon="rocket">
-    **Mapping:** Use $\boldsymbol{\tau} = J^T \mathbf{F}$ to convert force limits into joint torque limits.
-
-    **Configuration-dependent:** Force limits on joint torques must be updated at every control cycle because the Jacobian changes with configuration.
+    Use $\boldsymbol{\tau} = J^T \mathbf{F}$ to turn the force limit into joint torque limits, and update them in every control cycle, because $J$ changes with the pose.
   </Card>
 </CardGrid>
 
@@ -1057,22 +1065,20 @@ As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without 
 
 <Steps>
 
-1. **Derive the Jacobian analytically** for your specific robot geometry. Validate against numerical differentiation.
+1. **Derive the Jacobian** for your robot and check it with small test moves.
 
-2. **Map your workspace** for singularity locations. Mark these on the trajectory planner's obstacle map.
+2. **Find the singular poses** in your workspace and keep planned paths away from them.
 
-3. **Set singularity thresholds** based on your application's speed and force requirements.
+3. **Set singularity thresholds** from the speed and force your task needs.
 
-4. **Implement damped least-squares** as a fallback for near-singular configurations.
+4. **Add damped least squares** for poses near a singularity.
 
-5. **Test force mapping** at multiple configurations, especially near workspace boundaries.
-
-6. **For redundant robots,** implement null-space optimization with appropriate secondary objectives.
+5. **Test the force mapping** in several poses, most of all near the edge of the workspace.
 
 </Steps>
 
 :::tip[Industry Best Practice]
-"Design trajectories that stay well inside the workspace, where manipulability is high and force control is predictable." Planning paths that skirt workspace boundaries or pass near singularities saves reach but costs controllability and safety margin.
+Plan paths that stay well inside the workspace, where the hand moves easily in every direction. A path along the edge, or close to a singularity, gains a little reach and loses control and safety margin.
 :::
 
 ## Summary
@@ -1082,18 +1088,18 @@ As $\theta_2 \to 0°$, $\det(J) \to 0$ and the entries of $J^{-T}$ grow without 
 
 ### Key Concepts Covered
 
-1. **The Jacobian matrix** maps joint velocities to end-effector velocities through $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$
-2. **Forward velocity mapping** is always straightforward (matrix multiplication)
-3. **Inverse velocity mapping** requires $J^{-1}$ (square) or $J^{\dagger}$ (redundant) and fails at singularities
-4. **Singularities** occur when $\det(J) = 0$; for the 2R robot, this means $\sin\theta_2 = 0$
-5. **Manipulability ellipsoids** (from SVD) visualize directional velocity capability
-6. **Pseudoinverse** gives the minimum-norm solution for redundant robots, with null-space freedom for secondary objectives
-7. **Force mapping** uses $J^T$ and is the dual of velocity mapping
-8. **Collaborative safety** requires continuous Jacobian-based force monitoring, especially near singularities
+1. **The Jacobian matrix** turns joint speeds into the velocity of the end-effector: $\dot{\mathbf{x}} = J \dot{\mathbf{q}}$. Each column is the motion of the hand for one joint alone.
+2. **Forward velocity mapping** is a multiplication and works in every pose
+3. **Inverse velocity mapping** needs $J^{-1}$ or $J^{\dagger}$ and fails at singularities
+4. **Singularities** are the poses with $\det(J) = 0$. For the 2R arm, $\det(J) = L_1 L_2 \sin\theta_2$: the arm is singular when straight or fully folded.
+5. **Manipulability ellipsoids** show in which directions the hand moves easily
+6. **The pseudoinverse** gives a redundant robot the smallest joint speeds, and the null space leaves freedom for a second aim
+7. **Force mapping** uses the transpose: $\boldsymbol{\tau} = J^T \mathbf{F}$. Where the hand is fast it is weak.
+8. **Safety beside people** needs the force at the hand checked in every control cycle
 
 ### What Comes Next
 
-Next, in [Trajectory Planning and Motion Control](./trajectory-planning-motion-control), we will build on the Jacobian to plan smooth trajectories in both joint space and task space, using polynomial interpolation and velocity profiles to execute pick-and-place operations with the collaborative robot.
+[Trajectory Planning and Motion Control](/education/robotics/trajectory-planning-motion-control/) uses the Jacobian to plan smooth paths for pick-and-place work.
 
 
 

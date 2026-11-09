@@ -24,7 +24,7 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 
 
-Build complete robot simulations that bring together forward kinematics, inverse kinematics, Jacobian velocity control, and trajectory planning into one interactive Python framework. This final lesson walks through a multi-robot agricultural harvesting system, connecting every concept from the course to real applications in manufacturing, logistics, medicine, and agriculture. #RobotSimulation #PythonVisualization #AppliedRobotics
+On the screen, three robot arms pick strawberries in 3 seconds each and never touch. In the greenhouse, the first real arm arrives late and misses the fruit by 25 mm. The simulation did not lie about itself. It was never compared with the world. A simulation is a model, and a model that only agrees with itself proves nothing. This lesson builds a Python simulator for a two-joint arm from the kinematics, the Jacobian and the trajectories of this course, runs a harvesting cell of three arms in it, and shows how to check it: against a case solved by hand, and against one measurement on the machine. #RobotSimulation #PythonVisualization #AppliedRobotics
 
 ## Learning Objectives
 
@@ -41,46 +41,40 @@ By the end of this lesson, you will be able to:
 <InArticleAd />
 
 
-A precision agriculture company is deploying three 2R robot arms mounted on a mobile gantry to harvest ripe strawberries in a greenhouse row. Each robot must identify ripe fruit positions (provided by a vision system), plan collision-free reach trajectories, execute pick-and-place sequences to deposit fruit into collection bins, and coordinate with its neighbors so that no two arms collide in the shared workspace. The entire operation must run in real time with smooth, jerk-limited motion.
+A farm wants to harvest ripe strawberries in a greenhouse row with three robot arms on a gantry, a rail above the row. Each arm is a 2R planar arm: two links joined by two revolute (turning) joints, a shoulder and an elbow, moving in one plane. A camera system gives the position of each ripe fruit. Each arm must reach a fruit, pick it, and place it in its collection bin, and no two arms may collide where their reach overlaps.
 
 ### System Description
 
-**Multi-Robot Strawberry Harvesting Cell:**
-- **Three 2R Planar Arms** mounted at fixed base positions along a gantry rail
-- **Shared Workspace Region** where adjacent arms can overlap
-- **Vision System Feed** providing (x, y) positions of ripe fruit
-- **Collection Bins** at each arm's base for depositing harvested fruit
-- **Cycle Time Target** of 3 seconds per fruit (reach, pick, return, place)
+- **Three 2R planar arms** at fixed bases along the gantry rail
+- **A shared region** where the reach of two neighboring arms overlaps
+- **A vision system** that gives the (x, y) position of each ripe fruit, in meters
+- **A collection bin** at the base of each arm
+- **A cycle time target** of 3 seconds per fruit (reach, pick, place, return)
 
 ### The Simulation Challenge
 
 :::note[Critical Engineering Questions]
-- How do we combine FK, IK, Jacobian, and trajectory planning into a single simulation loop?
-- How should each robot select which fruit to harvest to minimize total cycle time?
-- What happens when two arms try to reach into the overlapping workspace simultaneously?
-- How do we visualize the entire system in real time so operators can monitor performance?
-- What safety checks prevent arms from exceeding joint limits or entering singular configurations?
+- How do the pieces of this course fit into one simulation loop? The pieces are forward kinematics (FK: joint angles to gripper position), inverse kinematics (IK: gripper position to joint angles), the Jacobian (joint velocities to gripper velocity) and trajectory planning.
+- Which arm should pick which fruit?
+- What happens when two arms reach into the shared region at the same time?
+- Which checks stop an arm from passing a joint limit or entering a singular pose, where it loses a direction of motion?
+- How far can the result be trusted before a real arm has moved?
 :::
 
 ### Why Agricultural Robotics Is a Growing Field
 
-Labor shortages in agriculture are accelerating the adoption of robotic harvesters worldwide. Strawberry harvesting is particularly challenging because the fruit is delicate, partially hidden by leaves, and ripens at different rates across a field. A successful harvesting robot must combine accurate positioning (kinematics), gentle contact (force control), and efficient sequencing (trajectory planning) with multi-robot coordination when scaling to commercial throughput. The simulation tools in this lesson form the foundation for prototyping and validating these systems before deployment.
+Farms in many countries cannot find enough workers at harvest time. Strawberries are a hard case for a robot: the fruit is soft, partly hidden by leaves, and does not ripen all at once. A mistake on a real plant costs fruit, so the motion is tried in simulation first.
 
 ### Consequences of Poor Simulation Design
 
-**Without proper simulation:**
-- Robots collide in shared workspace, damaging arms and crushing fruit
-- Singular configurations cause sudden velocity spikes that tear plants
-- Uncoordinated task allocation leaves some arms idle while others are overloaded
-- Joint limit violations stall motors and require manual resets
-- Operators cannot predict system behavior before field deployment
+A simulation finds some faults cheaply, before any hardware moves:
 
-**With a well-designed simulation framework:**
-- All collision scenarios are detected and resolved before hardware testing
-- Smooth trajectories are verified visually and numerically
-- Task allocation is balanced and optimized in simulation
-- Safety limits are enforced at every time step
-- The entire system can be tuned and validated on a laptop
+- two arms that cross in the shared region
+- a pose near a singularity, where joint velocities become very large
+- one arm with most of the fruit while another waits
+- a target outside the reach of every arm
+
+It cannot find a fault in something it does not contain. A simulator with no motor model shows an arm that moves at any speed. A simulator with a wrong link length reaches every target perfectly, in the wrong place.
 
 ## Fundamental Theory
 
@@ -89,37 +83,37 @@ Labor shortages in agriculture are accelerating the adoption of robotic harveste
 
 ### Simulation vs. Animation
 
-It is important to distinguish between simulation and animation, because they serve different purposes and require different computational approaches. A simulation computes the physical state of a system at each time step using mathematical models (kinematics, dynamics, constraints). An animation simply displays a sequence of frames, which may or may not come from a physics-based model. In robotics, we need simulation first and then use the computed states to drive the animation.
+A simulation calculates the state of the robot (joint angles, velocities, gripper position) at each time step from equations. An animation only draws pictures, one frame after another. In robotics the simulation comes first, and the animation draws what the simulation calculated. A smooth animation therefore says nothing about whether the equations behind it are right.
 
 <Tabs>
 <TabItem label="Simulation">
 
-**What it does:** Computes robot state (joint angles, velocities, end-effector position) at each discrete time step using kinematic equations.
+**What it does:** Calculates the state of the robot at each time step from the kinematic equations.
 
 **Key characteristics:**
-- Time-stepped: state at $t_{k+1}$ depends on state at $t_k$ and control input
-- Physics-based: governed by FK, IK, Jacobian, and trajectory equations from Lessons 1 through 5
-- Deterministic: same inputs always produce the same outputs
-- Validates feasibility: checks joint limits, singularities, workspace bounds
+- Stepped in time: the state at time $t_{k+1}$ follows from the state at $t_k$
+- Based on equations: FK, IK, the Jacobian and the trajectory formulas of this course
+- Repeatable: the same inputs always give the same outputs
+- Checks limits: joint limits, singularities, the edge of the workspace
 
-**Time-stepping approach:**
+**One time step:** the new joint angles are the old angles plus the joint velocity multiplied by the time step.
 
 $$
 \mathbf{q}(t_{k+1}) = \mathbf{q}(t_k) + \dot{\mathbf{q}}(t_k) \cdot \Delta t
 $$
 
-where $\mathbf{q}$ is the joint angle vector, $\dot{\mathbf{q}}$ is the joint velocity vector, and $\Delta t$ is the time step.
+Here $\mathbf{q}$ is the list of joint angles (rad), $\dot{\mathbf{q}}$ is the list of joint velocities (rad/s), and $\Delta t$ is the time step (s).
 
 </TabItem>
 <TabItem label="Animation">
 
-**What it does:** Renders a visual representation of the robot at each frame, driven by simulation data.
+**What it does:** Draws the robot at each frame from the simulation data.
 
 **Key characteristics:**
-- Frame-based: renders at a fixed display rate (e.g., 30 FPS)
-- Visual only: does not compute physics, just draws geometry
-- May interpolate between simulation steps for smoother display
-- Uses matplotlib `FuncAnimation` for 2D robot arm visualization
+- Runs at a fixed display rate (for example 30 frames per second, FPS)
+- Draws only: it calculates no motion
+- May fill in between simulation steps for a smoother picture
+- Here it uses matplotlib `FuncAnimation` to draw a 2D arm
 
 **Animation loop:**
 
@@ -132,29 +126,29 @@ $$
 
 ### Building a Robot Simulation Framework in Python
 
-A well-structured simulation framework encapsulates the robot model, state management, safety checks, and visualization into a single reusable class. This class brings together the forward kinematics, inverse kinematics, Jacobian analysis, and trajectory planning from earlier lessons into one coherent system.
+The simulator is one Python class that holds the model of the arm, its present state, the safety checks and the drawing. A class keeps these together, so that three arms are three copies of the same code.
 
 #### Robot Class Architecture
 
-The simulation class needs four core subsystems:
+The class has four parts:
 
 <Steps>
-1. **Kinematic Model**
-   Store link lengths $L_1, L_2$ and compute FK, IK, and Jacobian as methods. These are the same equations derived in the earlier kinematics and Jacobian lessons.
+1. **Kinematic model**
+   It stores the link lengths $L_1$ and $L_2$ (in meters) and calculates FK, IK and the Jacobian, with the equations of [Forward and Inverse Kinematics](/education/robotics/forward-inverse-kinematics/) and [Velocity Kinematics and the Jacobian](/education/robotics/velocity-kinematics-jacobian/).
 
-2. **State Management**
-   Track the current joint angles $\mathbf{q} = [\theta_1, \theta_2]^T$, joint velocities $\dot{\mathbf{q}}$, and end-effector position $\mathbf{p} = [x, y]^T$ at every time step.
+2. **State**
+   It keeps the present joint angles $\mathbf{q} = [\theta_1, \theta_2]^T$, the joint velocities $\dot{\mathbf{q}}$, and the position $\mathbf{p} = [x, y]^T$ of the end-effector (the gripper at the tip of the arm).
 
-3. **Safety and Constraint System**
-   Enforce joint angle limits $[\theta_{\min}, \theta_{\max}]$, check for proximity to singular configurations ($\det(J) \approx 0$), and verify that targets lie within the reachable workspace.
+3. **Safety checks**
+   It keeps each joint inside its limits $[\theta_{\min}, \theta_{\max}]$, warns near a singular pose ($\det(J) \approx 0$), and refuses a target outside the workspace, the region the gripper can reach.
 
-4. **Visualization Engine**
-   Render the robot arm, trajectory trail, workspace boundary, and safety zones using matplotlib.
+4. **Drawing**
+   It draws the arm, the trail of the gripper, the edge of the workspace and the safety zones with matplotlib.
 </Steps>
 
 #### Forward Kinematics
 
-The end-effector position of a 2R planar arm:
+FK answers: with these joint angles, where is the gripper? The shoulder angle $\theta_1$ is measured from the x-axis. The elbow angle $\theta_2$ is measured from the direction of the first link. Add the reach of the first link to the reach of the second:
 
 $$
 x = L_1 \cos(\theta_1) + L_2 \cos(\theta_1 + \theta_2)
@@ -164,9 +158,11 @@ $$
 y = L_1 \sin(\theta_1) + L_2 \sin(\theta_1 + \theta_2)
 $$
 
+**Check by hand.** The arm of this lesson has $L_1 = 1.0$ m and $L_2 = 0.8$ m. Two poses need no calculator. Straight out along x ($\theta_1 = 0$, $\theta_2 = 0$): the gripper must be at $(1.0 + 0.8,\; 0) = (1.8,\; 0)$. Elbow bent at a right angle ($\theta_1 = 0$, $\theta_2 = 90°$): the first link lies along x and the second points up, so the gripper must be at $(1.0,\; 0.8)$. The formulas give $x = 1.0\cos 0° + 0.8\cos 90° = 1.0$ and $y = 1.0\sin 0° + 0.8\sin 90° = 0.8$. Run these two poses through any FK code before you trust it.
+
 #### Inverse Kinematics
 
-Given a target $(x_t, y_t)$, solve for joint angles:
+IK answers the opposite question: to put the gripper at a target $(x_t, y_t)$, which joint angles are needed? The law of cosines gives the elbow angle, and the shoulder angle follows:
 
 $$
 \cos(\theta_2) = \frac{x_t^2 + y_t^2 - L_1^2 - L_2^2}{2 L_1 L_2}
@@ -180,9 +176,11 @@ $$
 \theta_1 = \text{atan2}(y_t, x_t) - \text{atan2}\!\left(L_2 \sin(\theta_2),\; L_1 + L_2 \cos(\theta_2)\right)
 $$
 
+The $\pm$ sign gives two answers, elbow up and elbow down, which reach the same point.
+
 #### Jacobian Matrix
 
-The velocity relationship $\dot{\mathbf{p}} = J(\mathbf{q}) \, \dot{\mathbf{q}}$:
+The Jacobian $J$ converts joint velocities to the velocity of the gripper, $\dot{\mathbf{p}} = J(\mathbf{q}) \, \dot{\mathbf{q}}$:
 
 $$
 J = \begin{bmatrix}
@@ -191,11 +189,11 @@ L_1 \cos(\theta_1) + L_2 \cos(\theta_1 + \theta_2) & L_2 \cos(\theta_1 + \theta_
 \end{bmatrix}
 $$
 
-The determinant $\det(J) = L_1 L_2 \sin(\theta_2)$ vanishes when $\theta_2 = 0$ or $\theta_2 = \pi$ (fully extended or fully folded), indicating a singularity.
+Its determinant is $\det(J) = L_1 L_2 \sin(\theta_2)$. It is zero when $\theta_2 = 0$ or $\theta_2 = \pi$ (arm fully straight or fully folded). These poses are the singularities: the gripper cannot move along the line of the arm, whatever the joints do. The size of the determinant, $|\det(J)|$, is called the manipulability. For this arm it is at most $1.0 \times 0.8 = 0.8$, at a right-angle elbow, and it falls to zero at a singularity.
 
 ### Visualization with matplotlib
 
-The matplotlib library provides everything needed for 2D robot simulation visualization. The `FuncAnimation` class drives the animation loop, calling an update function at each frame to redraw the robot arm, trajectory trail, and workspace overlays. This approach is simple enough for educational use while being powerful enough to visualize complex multi-robot scenarios.
+The matplotlib class `FuncAnimation` runs the animation. It calls an update function once per frame, and that function redraws the arm, the trail of the gripper and the edge of the workspace.
 
 #### FuncAnimation Usage
 
@@ -243,10 +241,10 @@ plt.show()
 ```
 
 :::note[Key Animation Parameters]
-- `frames`: total number of animation frames (controls how long the animation runs)
-- `interval`: milliseconds between frames (33 ms gives approximately 30 FPS)
-- `blit=True`: only redraw changed elements for better performance
-- The `update` function must return a list of modified matplotlib artists
+- `frames`: the number of frames, which sets how long the animation runs
+- `interval`: milliseconds between frames (33 ms gives about 30 FPS)
+- `blit=True`: redraw only what changed, which is faster
+- The `update` function must return a list of the matplotlib artists (the drawn objects) that it changed
 :::
 
 #### Real-Time Arm Rendering
@@ -293,7 +291,7 @@ def update_trail(ex, ey, max_points=200):
 
 #### Workspace Overlay
 
-Draw the workspace annulus (reachable region) as a visual reference:
+The workspace of a 2R arm is a ring (an annulus). The gripper reaches no farther than $L_1 + L_2$ from the base and no nearer than $|L_1 - L_2|$:
 
 ```python
 def draw_workspace(ax, L1, L2, base_x=0, base_y=0):
@@ -316,7 +314,7 @@ def draw_workspace(ax, L1, L2, base_x=0, base_y=0):
 
 ### Complete 2R Robot Simulator
 
-The following Python class combines all concepts from Lessons 1 through 5 into a single simulation framework. It includes forward kinematics, inverse kinematics with solution selection, Jacobian computation with singularity detection, cubic polynomial trajectory generation, joint limit enforcement, and matplotlib-based visualization. This is the core building block for the multi-robot system that follows.
+The class below is the whole simulator for one arm: FK, IK with the choice of elbow up or down, the Jacobian with a singularity warning, the cubic trajectory, and the joint limits. The harvesting cell later uses three copies of it. Note what it does not contain: no motor, no mass, no friction. An arm in this class moves as fast as the plan asks.
 
 ```python
 import numpy as np
@@ -510,15 +508,15 @@ class Robot2R:
 ```
 
 :::note[Design Decisions in the Simulator Class]
-- **Workspace check in IK:** Returns `None` instead of an invalid solution when the target is unreachable. The caller must handle this gracefully.
-- **Joint clamping:** Enforces hard limits by clipping angles. In a real system, you would also decelerate before hitting limits.
-- **Singularity threshold:** Set to 0.05 by default. This value depends on link lengths and desired safety margin. Tune it for your specific robot.
-- **Cubic trajectory:** Uses zero-velocity boundary conditions for smooth starts and stops, matching the approach from the trajectory-planning lesson.
+- **Workspace check in IK:** it returns `None`, not a wrong answer, when the target cannot be reached. The code that calls it must test for `None`.
+- **Joint clamping:** an angle beyond a limit is cut back to the limit. A real controller would also slow the joint before the limit.
+- **Singularity threshold:** the arm counts as near a singularity when $|\det(J)|$ is below 0.05. The right value depends on the link lengths and on the margin you want.
+- **Cubic trajectory:** each joint starts and stops at rest, as in [Trajectory Planning and Motion Control](/education/robotics/trajectory-planning-motion-control/). The trajectory is a list of positions with no time attached. The time comes later, from the frame interval of the animation.
 :::
 
 ### Animated Pick-and-Place Demonstration
 
-The following script creates an animated pick-and-place sequence for a single 2R robot. It plans a trajectory from a home configuration to a pick location, then to a place location, and back to home. The animation shows the arm moving, the end-effector trail, and the workspace boundary in real time.
+This script animates one arm. It plans a move from the home configuration (the waiting pose) to a pick position, then to a place position, and back.
 
 ```python
 import numpy as np
@@ -618,7 +616,9 @@ When you run this script, a matplotlib window opens showing:
 5. **Dark arm with red joints:** the 2R robot arm moving through the pick-and-place sequence
 6. **Blue trail:** the path traced by the end-effector
 
-The arm starts at the home configuration, smoothly moves to the pick position, then to the place position, and finally returns home. The motion is smooth at start and end of each segment because the cubic trajectory enforces zero-velocity boundary conditions.
+The arm starts at the home configuration, moves to the pick position, then to the place position, and returns home. Each segment starts and ends gently, because the cubic trajectory has zero velocity at both ends.
+
+Each segment has 40 frames at 50 ms, so it lasts about 2 s. The largest joint move is the shoulder between pick and place, $71.2°$. A cubic has a peak velocity of 1.5 times the average, so the simulator asks that joint for $1.5 \times 71.2 / 2 = 53$ deg/s. Whether a real motor can give that is a question the simulator does not ask.
 
 </details>
 
@@ -687,15 +687,15 @@ visualize_workspace_safety(robot, resolution=150)
 ```
 
 :::note[Reading the Manipulability Map]
-- **Bright (yellow) regions:** high manipulability, the robot can move freely in all directions. Prefer these regions for precision tasks.
-- **Dark (purple) regions:** low manipulability, approaching a singularity. Velocities may spike. Avoid sustained work here.
-- **NaN (transparent) regions:** outside the reachable workspace entirely.
-- **Orange dashed circle:** the 90% safety margin. Keeping the end-effector inside this boundary provides a buffer against workspace edge effects.
+- **Bright (yellow) regions:** high manipulability. The gripper can move easily in every direction. Do exact work here.
+- **Dark (purple) regions:** low manipulability, close to a singularity. Joint velocities can become very large. Do not work here for long.
+- **Empty (transparent) regions:** outside the workspace. The program marks them NaN, "not a number".
+- **Orange dotted circle:** 90% of the full reach. A gripper kept inside it stays away from the singularity at the outer edge.
 :::
 
 ### Practical Applications of Robotics
 
-The kinematic principles, trajectory planning methods, and simulation tools developed throughout this course apply directly to real-world robotic systems across many industries. Each application domain has specific requirements, but the underlying mathematics is the same: FK to predict position, IK to reach targets, Jacobian for velocity control, and trajectory planning for smooth, safe motion.
+The same four tools serve every field below: FK to predict a position, IK to reach a target, the Jacobian to control velocity, and trajectory planning for motion the motors can make. Only the requirements change.
 
 <CardGrid>
   <Card title="Manufacturing" icon="setting">
@@ -738,34 +738,17 @@ The kinematic principles, trajectory planning methods, and simulation tools deve
     **Key metrics:** harvest rate, fruit damage rate, field coverage
   </Card>
 
-  <Card title="Food Processing" icon="star">
-    **Packaging:** High-speed pick-and-place robots sort and package food items, requiring fast IK solutions and minimum-time trajectories.
-
-    **Quality Inspection:** Camera-equipped arms scan products from multiple angles, using FK to position the camera at precise inspection viewpoints.
-
-    **Deboning and Cutting:** Force-controlled arms follow complex 3D paths through variable-geometry products, combining trajectory planning with real-time Jacobian-based compliance.
-
-    **Key metrics:** throughput, hygiene compliance, consistency
-  </Card>
-
-  <Card title="Construction and Infrastructure" icon="document">
-    **3D Printing:** Large-scale robotic arms extrude concrete along planned paths, using task-space trajectory planning for layer-by-layer deposition.
-
-    **Inspection:** Articulated arms inspect bridges, tunnels, and pipelines, computing IK to reach inspection points in confined or hard-to-access spaces.
-
-    **Demolition:** Controlled dismantling requires workspace analysis to ensure the arm can reach all target points while maintaining safe configurations.
-
-    **Key metrics:** build accuracy, reach coverage, structural safety
-  </Card>
 </CardGrid>
+
+Food packaging, quality inspection and the 3D printing of buildings use the same tools.
 
 ### Error Handling and Safety
 
-A production-grade robot simulation must handle errors and enforce safety constraints at every time step. The four most important safety systems for a planar robot arm are joint limit checking, singularity avoidance, workspace boundary enforcement, and collision detection. In simulation, these checks prevent invalid states. On real hardware, they prevent damage, injury, or system failure.
+A simulation must test four things at every time step: the joint limits, the distance from a singularity, the edge of the workspace, and collisions. In the simulation these tests stop impossible states. On a real arm the same tests prevent damage and injury.
 
 #### Joint Limit Checking
 
-Every motor has a physical rotation range. Exceeding it can damage gears, belts, or the motor itself.
+Every joint has a range it can turn through. Beyond it, gears, belts or the motor can be damaged.
 
 ```python
 def enforce_joint_limits(q, limits):
@@ -783,12 +766,12 @@ def enforce_joint_limits(q, limits):
 ```
 
 :::note[Joint Limit Strategy]
-In simulation, you can simply clamp the angles. In real systems, a better approach is to decelerate the joint before it reaches the limit. This requires monitoring the distance to the limit and reducing velocity proportionally, which ties back to the Jacobian velocity relationship from the earlier Jacobian lesson.
+In simulation it is enough to clamp the angle. On a real arm, slow the joint before it reaches the limit: watch the distance to the limit and reduce the velocity as that distance shrinks.
 :::
 
 #### Singularity Avoidance
 
-When $\det(J) \approx 0$, the inverse Jacobian blows up, causing extreme joint velocities for small task-space commands.
+To move the gripper at a wanted velocity, the controller divides by $\det(J)$. When $\det(J)$ is close to zero, a small gripper velocity asks for a very large joint velocity.
 
 ```python
 def singularity_safe_ik_velocity(J, v_desired, threshold=0.05, damping=0.1):
@@ -811,11 +794,13 @@ def singularity_safe_ik_velocity(J, v_desired, threshold=0.05, damping=0.1):
 
 ### Why Damped Least-Squares Works
 
-The damped least-squares method (also called Levenberg-Marquardt for IK) adds a regularization term $\lambda^2 I$ to the $J J^T$ matrix before inversion. This ensures the matrix is always invertible, even at exact singularities. The trade-off is that the end-effector velocity will deviate slightly from the commanded direction near singularities, but the joint velocities remain bounded. The damping factor $\lambda$ increases as the manipulability decreases, providing more regularization exactly where it is needed. This technique was introduced conceptually in the velocity-kinematics lesson and is now applied in the simulation framework.
+The damped least-squares method (also called Levenberg-Marquardt) adds a small positive number, $\lambda^2$, to the diagonal of the matrix $J J^T$ before it is inverted. The sum can always be inverted, even exactly at a singularity, so the joint velocities stay limited.
+
+The price is accuracy: near a singularity the gripper moves a little off the direction that was asked. In the code, the damping factor $\lambda$ is zero away from a singularity and grows as the manipulability falls, so the error appears only where the protection is needed. The method was introduced in [Velocity Kinematics and the Jacobian](/education/robotics/velocity-kinematics-jacobian/).
 
 #### Workspace Boundary Enforcement
 
-Targets outside the reachable annulus must be rejected or projected onto the boundary.
+A target outside the ring of the workspace must be refused, or moved to the nearest point the arm can reach.
 
 ```python
 def project_to_workspace(target, base, r_inner, r_outer, margin=0.05):
@@ -839,7 +824,7 @@ def project_to_workspace(target, base, r_inner, r_outer, margin=0.05):
 
 #### Collision Detection Basics
 
-For multi-robot systems, check whether any link of one robot intersects any link of another.
+With several arms, test whether any link of one arm crosses any link of another. Each link is treated as a straight line segment with no thickness, so a real cell needs a margin on top of this test.
 
 ```python
 def segments_intersect(p1, p2, p3, p4):
@@ -884,7 +869,7 @@ def check_robot_collision(robot_a, robot_b):
 <InArticleAd />
 
 
-Now we bring everything together into the multi-robot strawberry harvesting system described in the engineering challenge. Three 2R arms are mounted along a gantry, each with its own workspace. A set of fruit positions is provided by the vision system. The simulation allocates fruit to the nearest available robot, plans collision-free trajectories, and animates the entire sequence.
+Three 2R arms stand 2.0 m apart along the gantry. Each reaches 1.8 m, so the workspaces of neighbors overlap. The vision system gives a list of fruit positions. The simulation gives each fruit to an arm, plans the moves, tests every frame for a collision between arms, and animates the result.
 
 ```mermaid
 flowchart TD
@@ -904,7 +889,7 @@ flowchart TD
 
 ### Task Allocation Strategy
 
-Each fruit is assigned to the robot whose base is closest, provided the fruit is within that robot's workspace. If a fruit falls in the overlap zone between two robots, it is assigned to the one with higher manipulability at that point (better dexterity means faster, more accurate motion).
+For each fruit, the program gives a score to every arm that can reach it: the manipulability at that point divided by the distance from the base of the arm. The fruit goes to the arm with the highest score. A near arm in a good pose wins. A fruit in the overlap between two arms goes to the one that reaches it more easily, and a fruit that no arm can reach is left out.
 
 ### Complete Multi-Robot Harvesting Simulation
 
@@ -1020,7 +1005,7 @@ class HarvestingCell:
 
         for idx in trajectories:
             traj = trajectories[idx]
-            if len(traj) < max_len:
+            if 0 < len(traj) < max_len:
                 # Pad with last configuration
                 traj += [traj[-1]] * (max_len - len(traj))
 
@@ -1129,13 +1114,19 @@ cell.animate(fruit_positions)
 <details>
 <summary>What the simulation shows</summary>
 
-The animation displays three robot arms (red, green, blue) mounted along a horizontal gantry. Red dots scattered in the upper half of the frame represent strawberries. Colored rectangles below each base represent collection bins.
+The animation shows three arms (red, green, blue) along a horizontal gantry. Red dots in the upper half are strawberries. The colored squares below the bases are the collection bins.
 
-Each arm reaches for its assigned fruit, picks it, deposits it in the bin, and returns home before moving to the next fruit. The trajectory trails show the end-effector paths in each arm's color. The status bar shows the frame count, fruit allocation per robot, and a collision warning if any arms intersect.
+Each arm reaches for a fruit, picks it, places it in the bin and returns home before the next fruit. The trails show the path of each gripper. The status line shows the frame number, the number of fruit given to each arm, and a warning if two arms cross.
 
-You can modify the `fruit_positions` array or change the robot spacing to explore how the allocation strategy adapts. Try placing fruit directly in the overlap zone between two robots to see the manipulability-based tiebreaker in action.
+With the seed 42, the arms receive 4, 2 and 5 fruit. That is 11 of the 12. The fruit near $(-0.88,\; 1.58)$ is 1.81 m from the nearest base, just beyond the 1.8 m reach, and the program leaves it out without a message. No frame reports a collision. That result holds for this set of fruit only: the program detects a collision but does nothing to avoid one.
+
+Change the `fruit_positions` or the spacing of the arms and run it again. Put a fruit in the overlap between two arms to see which arm the score chooses.
 
 </details>
+
+:::caution[The 3-second cycle is not yet proven]
+Each fruit takes three segments of 25 frames at 40 ms, so the animation shows 3 s per fruit, the target. Look at one segment. The left arm carries a fruit from $(-3.36,\; 0.88)$ to its bin, and its shoulder turns from $123.9°$ to $-142.4°$: a move of $266.3°$ in about 1 s. The peak velocity of a cubic is 1.5 times the average, $1.5 \times 266.3 / 1 = 399$ deg/s. Take a joint motor limited to 120 deg/s, the limit used in the trajectory-planning lesson. At top speed all the way it needs $266.3 / 120 = 2.2$ s for that one segment, and a cubic it can follow needs $1.5 \times 266.3 / 120 = 3.3$ s. The simulator reports no problem, because it contains no motor.
+:::
 
 ## Design Guidelines for Building Stable Simulations
 
@@ -1144,27 +1135,23 @@ You can modify the `fruit_positions` array or change the robot spacing to explor
 
 <CardGrid>
   <Card title="Separate Simulation from Visualization" icon="setting">
-    Keep the kinematic computation (simulation) independent of the rendering (animation). The simulation should produce a trajectory (sequence of joint angle vectors) first. The animation then plays back that trajectory. This separation makes it easy to swap visualization backends, save trajectories to files, or run batch simulations without rendering.
+    Let the simulation produce the trajectory (a list of joint angles) first, and let the animation only play it. Then you can save the trajectory, draw it another way, or run many cases with no drawing at all.
   </Card>
 
   <Card title="Always Check Feasibility Before Planning" icon="warning">
-    Before computing a trajectory to a target, verify: (1) the target is inside the workspace, (2) an IK solution exists and satisfies joint limits, and (3) the configuration is not near a singularity. Failing to check these conditions leads to invalid trajectories, numerical errors, or sudden arm jerks.
+    Before you plan a move to a target, confirm three things: the target is inside the workspace, IK has an answer inside the joint limits, and the pose is not near a singularity. Then check the peak joint velocity of the planned move against the motor.
   </Card>
 
   <Card title="Use Smooth Trajectory Profiles" icon="approve-check">
-    Cubic or quintic polynomials ensure zero-velocity starts and stops, which prevent mechanical shock and reduce motor wear. For multi-segment paths, ensure velocity continuity at segment boundaries. Never command step changes in joint angles.
+    A cubic or quintic polynomial starts and stops at zero velocity, which spares the gears and the motor. Where segments join, the velocity must not jump. Never command a sudden step in a joint angle.
   </Card>
 
   <Card title="Implement Collision Checking for Multi-Robot" icon="danger">
-    In multi-robot cells, collision detection is not optional. At minimum, check segment-segment intersection between all robot links at every time step. For real-time systems, spatial partitioning (bounding boxes, sweep-and-prune) reduces the computational cost from $O(n^2)$ to $O(n \log n)$. Production systems use mature libraries: **FCL** (Flexible Collision Library, what MoveIt calls internally), **Bullet** (what Gazebo and PyBullet use), and **ODE**. These handle meshes, convex decompositions, and broad-phase pruning far better than hand-rolled code, and they scale to hundreds of obstacles without a frame-rate hit.
+    Where arms share space, test every link of each arm against every link of the others at every time step. Real cells use tested libraries for this: **FCL** (Flexible Collision Library, used by MoveIt), **Bullet** (used by Gazebo and PyBullet) and **ODE**. They handle real link shapes and many obstacles far better than code written by hand.
   </Card>
 
   <Card title="Scale Simulations Incrementally" icon="rocket">
-    Start with a single robot performing one pick-and-place. Validate the kinematics, trajectory, and visualization. Then add a second robot and test collision detection. Only then scale to the full multi-robot system. Debugging a 3-robot system from scratch is far harder than building up from a validated single-robot simulator.
-  </Card>
-
-  <Card title="Log and Replay for Debugging" icon="document">
-    Store the complete trajectory (all joint angles at all time steps) in a NumPy array or CSV file. This allows you to replay any simulation run, analyze it frame by frame, and compare different planning strategies without re-running the simulation.
+    Start with one arm and one pick-and-place, and check it by hand. Add a second arm and test the collision check. Only then run the full cell. A fault in a cell of three arms is much harder to find than a fault in one arm.
   </Card>
 </CardGrid>
 
@@ -1173,55 +1160,63 @@ You can modify the `fruit_positions` array or change the robot spacing to explor
 <InArticleAd />
 
 
-The Python simulator in this lesson is complete enough to validate kinematics and trajectory planning, but production robotics development happens in a larger ecosystem. The single biggest gap between the code above and a working factory cell is that the simulator treats the robot as ideal, while real hardware is not.
+The simulator of this lesson treats the arm as ideal: exact link lengths, joints that go where they are told, motors with no limit. A real arm is none of these.
 
 ### The Sim-to-Real Gap
 
-Every real actuator has friction that is nonzero at rest and changes with temperature. Cables and gearboxes have backlash, measured in tenths of a degree and varying with direction of travel. Payloads sag the arm by millimeters in ways a point-mass model does not capture. Sensors drift and add noise. Communication buses introduce delay. A trajectory that executes perfectly in simulation can still miss the target by centimeters on hardware because every one of these effects is absent from the idealized Python model.
+A real motor has friction, and a top speed. Gearboxes have backlash, a small free play of some tenths of a degree when the direction reverses. A load bends the arm by millimeters. Sensors drift, and messages arrive late. None of this is in the Python model, so a trajectory that is perfect on the screen can miss by centimeters on the machine.
 
-Practical mitigations:
+A common false comfort is the round trip: give a target to IK, give the angles to FK, and get the target back to six decimal places. This shows only that the two functions agree with each other. If both use $L_2 = 0.80$ m and the real link is 0.79 m, the round trip is still perfect and the real gripper is 10 mm away. Check the model against something outside it, in two steps:
 
-- **Identify the gap early.** Run the simulator's commanded trajectory on the real robot and log joint position error at every tick. The residuals tell you which effects dominate.
-- **Add first-order models** of the worst offenders (backlash, torque saturation, actuator delay) to the simulator once you measure them. A rough model is vastly better than none.
-- **Close the loop on the robot, not the plan.** Command trajectories with feedback, not open-loop playback.
-- **Budget margin.** Do not design processes that rely on the robot hitting a 0.1 mm target if the measured tracking error is 0.5 mm.
+<Steps>
+1. **A case solved by hand.** Use a pose where the answer is plain from the geometry, such as the two FK poses above, or a move whose end is known. This finds errors in the code: a wrong sign, degrees mixed with radians, the two links exchanged.
+
+2. **One measurement on the machine.** Command one pose and measure where the gripper is with a ruler, or time one move with a stopwatch. This finds errors in the numbers. For the pick position $(1.2,\; 0.8)$, a shoulder whose zero is off by $1°$ moves the gripper by $1.44 \text{ m} \times 0.01745 \text{ rad} = 25$ mm, where 1.44 m is the distance from the base.
+</Steps>
+
+Then close the gap where it matters:
+
+- **Log the error.** Run the planned trajectory on the real arm and record the joint position error at every control cycle. The record shows which effect is largest.
+- **Add simple models** of the largest effects (the speed limit of the motor, backlash, delay) to the simulator, with the values you measured.
+- **Use feedback on the robot.** Follow the trajectory with position feedback, and do not play it back blind.
+- **Keep a margin.** Do not design a process that needs 0.1 mm if the measured error is 0.5 mm.
 
 ### ROS, MoveIt, and the URDF Ecosystem
 
-For anything beyond a single demo, you will eventually interface with the ROS (Robot Operating System) ecosystem. The essentials:
+Work on real robots mostly uses ROS (Robot Operating System), a set of open software for robots. Its main parts:
 
-- **URDF** (Unified Robot Description Format) is the standard XML file describing a robot's links, joints, joint limits, meshes, and inertial properties. Every major manufacturer publishes a URDF for their arm. Load it with `urdfpy`, `pinocchio`, or inside `robotics_toolbox`; the DH parameters you have been using are a subset of what URDF specifies.
-- **MoveIt** is a motion-planning framework that layers IK solvers (KDL, TRAC-IK, BioIK), sampling-based planners (OMPL), collision checking (FCL), and execution monitoring on top of a URDF. For a Universal Robots arm or a Franka Panda, you can go from `apt install` to a planned pick-and-place in an afternoon.
-- **Gazebo, Drake, and PyBullet** are physics-based simulators that handle dynamics, contact, and sensor models. Unlike the kinematic simulator in this lesson, they model forces and masses; use them to validate control algorithms before touching real hardware.
-- **ROS topics and actions** carry `JointTrajectory` messages from your planner to the real robot. A trajectory computed in NumPy can be converted to a ROS `trajectory_msgs/JointTrajectory` with about ten lines of glue code.
+- **URDF** (Unified Robot Description Format) is the standard file that describes a robot: links, joints, joint limits, shapes and masses. Many manufacturers publish one for their arms. Load it with `urdfpy`, `pinocchio` or `robotics_toolbox`. It holds everything the DH parameters hold, and more.
+- **MoveIt** is a motion-planning framework that works from a URDF. It combines IK solvers (KDL, TRAC-IK, BioIK), path planners (OMPL), collision checking (FCL) and monitoring of the motion.
+- **Gazebo, Drake and PyBullet** are simulators with physics: forces, masses, contact and sensor models. The simulator of this lesson has positions only. Use a physics simulator to test a controller before it runs on a real arm.
+- **ROS topics and actions** carry `JointTrajectory` messages from the planner to the robot. A trajectory calculated in NumPy converts to a `trajectory_msgs/JointTrajectory` in about ten lines of code.
 
-The Python simulator you built here is the right foundation for learning the algorithms; ROS / MoveIt is the right tool the moment you have real hardware or more than one team member.
+The Python simulator of this lesson is the right place to learn the algorithms. Move to ROS and MoveIt when you have a real arm, or more than one person on the project.
 
 ### Always Export Trajectories
 
-Even when you are only running simulations, save every trajectory to disk as CSV or NumPy `.npz` with timestamps, joint angles, joint velocities, and the commanded Cartesian pose. This makes the difference between "it worked once" and a reproducible system: you can replay a trajectory, diff two planning strategies, feed the data to a plotting pipeline, or hand it to a downstream controller for hardware testing without re-running the planner.
+Save every trajectory to a file (CSV or NumPy `.npz`) with the times, the joint angles, the joint velocities and the commanded position of the gripper. A saved trajectory can be replayed, compared with another plan, plotted, or given to a controller for a test on hardware, and none of these needs the planner to run again.
 
 ## Course Summary
 
 <InArticleAd />
 
 
-This completes the six-lesson Robotics course. Here is a recap of the entire learning path and how each lesson connects:
+The six lessons of the Robotics course, and what each one added:
 
 <Steps>
-1. **[Robot Arm Geometry and Configuration](./robot-arm-geometry-configuration)**
+1. **[Robot Arm Geometry and Configuration](/education/robotics/robot-arm-geometry-configuration/)**
    Established the foundation: link lengths, joint types (revolute, prismatic), workspace geometry, and common architectures (SCARA, articulated, delta). These parameters define what a robot can physically reach.
 
-2. **[Forward and Inverse Kinematics](./forward-inverse-kinematics)**
+2. **[Forward and Inverse Kinematics](/education/robotics/forward-inverse-kinematics/)**
    Derived the FK equations that map joint angles to end-effector positions, and the IK equations that solve the reverse problem. Handled multiple solutions and workspace boundaries, the core position-level tools used throughout the course.
 
-3. **[Orientation and Quaternions](./orientation-quaternions)**
+3. **[Orientation and Quaternions](/education/robotics/orientation-quaternions/)**
    Introduced Euler angles, exposed their gimbal lock limitation, and developed quaternion mathematics for singularity-free orientation representation. SLERP interpolation provided smooth rotational motion, essential for 6-DOF robots.
 
-4. **[Velocity Kinematics and the Jacobian](./velocity-kinematics-jacobian)**
+4. **[Velocity Kinematics and the Jacobian](/education/robotics/velocity-kinematics-jacobian/)**
    Built the Jacobian matrix linking joint velocities to task-space velocities. Analyzed singularities, computed manipulability ellipsoids, and introduced damped least-squares for stable velocity control near singular configurations.
 
-5. **[Trajectory Planning and Motion Control](./trajectory-planning-motion-control)**
+5. **[Trajectory Planning and Motion Control](/education/robotics/trajectory-planning-motion-control/)**
    Compared joint-space and task-space planning. Implemented cubic and quintic polynomial interpolation, trapezoidal velocity profiles, and multi-point path sequencing for complete pick-and-place operations.
 
 6. **Robot Simulation and Practical Applications (this lesson)**
@@ -1247,10 +1242,6 @@ This completes the six-lesson Robotics course. Here is a recap of the entire lea
     - **Planning under uncertainty:** probabilistic roadmaps, RRT, and motion planning in cluttered environments
   </Card>
 </CardGrid>
-
----
-
-Congratulations on completing the Robotics course. The mathematical foundation and simulation skills you have developed form a solid basis for working with real robotic systems, whether in a research lab, a factory floor, a surgical suite, or a greenhouse.
 
 
 

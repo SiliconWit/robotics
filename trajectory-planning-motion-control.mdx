@@ -24,7 +24,7 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 
 
-Trajectory planning bridges the gap between knowing where a robot should go and actually getting it there smoothly. In this lesson, we design trajectories for a warehouse mobile manipulator performing pick-and-place operations, covering polynomial interpolation, spline paths through multiple waypoints, and trapezoidal velocity profiles that respect actuator limits. #TrajectoryPlanning #MotionControl #Robotics
+A robot arm that is told only where to go tries to be there at once. Its motors cannot do that, so the arm shakes, a box slips from the gripper, or a cup of liquid spills. A path says where the arm goes. A trajectory says where and when: it gives the position at every moment, and so it fixes the speed and the acceleration too. This lesson shows how to choose that timing for a warehouse arm that moves boxes from a shelf to a conveyor, so that every motion is one the motors can make. #TrajectoryPlanning #MotionControl #Robotics
 
 ## Learning Objectives
 
@@ -41,18 +41,22 @@ By the end of this lesson, you will be able to:
 <InArticleAd />
 
 
-A warehouse mobile manipulator must pick boxes from storage shelves and place them on a conveyor belt for shipping. The robot arm (a 6-DOF articulated manipulator mounted on a mobile base) needs to move between shelf locations and the conveyor with smooth, predictable motions. Jerky trajectories cause the gripper to drop boxes, damage products, and wear out actuators prematurely. The system must handle boxes at different shelf heights, plan paths that avoid shelf edges, and maintain a cycle time under 8 seconds per pick-and-place operation.
+A warehouse robot must pick boxes from storage shelves and place them on a conveyor belt. Its arm has six joints (six degrees of freedom, 6-DOF) and stands on a mobile base. Motion that jerks makes the gripper drop boxes, damages products and wears the motors and gears early. The arm must reach boxes at different shelf heights, keep clear of the shelf edges, and finish one pick and one place in under 8 seconds. That time is the cycle time.
 
 :::note[Key Engineering Questions]
-1. How do we generate smooth joint motions that start and stop without sudden velocity jumps?
-2. Should the robot plan its path in joint space or Cartesian (task) space, and when does each approach make sense?
-3. How do we enforce maximum velocity and acceleration constraints imposed by the actuators?
-4. How do we sequence the full pick-and-place cycle (approach, descend, grasp, lift, transport, lower, release, return) with smooth transitions between phases?
+1. How do we make a joint start and stop with no sudden jump in velocity?
+2. Should the motion be planned in the joint angles or in the position of the gripper, and when is each one right?
+3. How do we keep inside the largest velocity and the largest acceleration the motors can give?
+4. How do we join the steps of the full cycle (approach, descend, grasp, lift, transport, lower, release, return) smoothly?
 :::
 
 ### Why Trajectory Smoothness Matters
 
-A trajectory that commands instantaneous velocity changes requires infinite acceleration, which no real motor can produce. The result is vibration, tracking error, and mechanical stress. Smooth trajectories (with continuous velocity, and ideally continuous acceleration) let the motor controllers track the commanded path accurately, reduce energy consumption, and extend the lifespan of gears and bearings. In a warehouse setting, a single dropped box can halt an entire packing line, so smoothness directly affects throughput and reliability.
+Three quantities describe the motion of a joint. Velocity is how fast the angle changes, in degrees per second (deg/s). Acceleration is how fast the velocity changes, in deg/s². Jerk is how fast the acceleration changes.
+
+A motor cannot change its velocity in no time. That would need an acceleration without limit, and so a torque without limit. A trajectory that asks for it gets vibration, an arm that falls behind the plan, and stress in the gears.
+
+A standing passenger in a bus feels the same thing. At a steady speed, however high, standing is easy. The passenger is thrown when the driver brakes or pulls away sharply, which is when the acceleration changes suddenly. A box in a gripper is that passenger. So a good trajectory has a velocity with no jumps, and for a fragile load an acceleration with no jumps.
 
 ## Fundamental Theory
 
@@ -74,78 +78,75 @@ flowchart TD
     D -- Path shape is critical --> Task-Space
 ```
 
-There are two fundamental approaches to planning a robot trajectory. Joint-space planning interpolates directly between joint angle vectors, while task-space planning interpolates the end-effector pose (position and orientation) in Cartesian coordinates. Each approach has distinct advantages and trade-offs.
+A motion can be planned in two places. Joint space is the set of joint angles of the arm. Task space (also called Cartesian space) is the position and orientation of the gripper, in meters along x, y and z. Planning means interpolating: finding the values between a start and a goal.
 
 <Tabs>
 <TabItem label="Joint-Space Planning">
 
-**How it works:** Given start joint angles $\mathbf{q}_0$ and goal joint angles $\mathbf{q}_f$, interpolate each joint independently as a function of time $t$.
+**How it works:** Take the joint angles at the start, $\mathbf{q}_0$, and at the goal, $\mathbf{q}_f$. Move each joint from its start to its goal as a function of time $t$, without regard to the other joints.
 
 **Advantages:**
-- Simple to implement: each joint follows its own polynomial or profile
-- No singularity issues during motion (the Jacobian is never needed)
-- Guaranteed to respect joint limits if start and goal are within limits
-- Computationally inexpensive
+- Simple: each joint follows its own curve
+- No trouble from singularities, the poses where the arm loses a direction of motion
+- Stays inside the joint limits if the start and the goal are inside them
+- Needs little calculation
 
 **Disadvantages:**
-- The end-effector path in Cartesian space is generally curved and unpredictable
-- Cannot guarantee straight-line motion of the tool tip
-- Not suitable when the Cartesian path matters (e.g., welding a seam, avoiding obstacles)
+- The gripper moves along a curve that is hard to predict
+- The tool tip cannot be made to move in a straight line
+- Not suitable when the path of the gripper matters (welding a seam, passing an obstacle)
 
-**Best for:** Point-to-point moves where only the start and end positions matter, such as moving between widely separated waypoints in a pick-and-place cycle.
+**Best for:** moves where only the start and the end matter, such as the long move from the shelf to the conveyor.
 
 </TabItem>
 <TabItem label="Task-Space Planning">
 
-**How it works:** Given start pose $\mathbf{x}_0$ and goal pose $\mathbf{x}_f$ in Cartesian space, interpolate position (and orientation using quaternion SLERP, covered in [Orientation and Quaternions](./orientation-quaternions)), then solve inverse kinematics at each time step.
+**How it works:** Take the pose of the gripper at the start, $\mathbf{x}_0$, and at the goal, $\mathbf{x}_f$. Interpolate the position (and the orientation, with the quaternion SLERP of [Orientation and Quaternions](/education/robotics/orientation-quaternions/)). At each time step, solve the inverse kinematics (IK): the joint angles that put the gripper at that pose.
 
 **Advantages:**
-- Full control over the Cartesian path (straight lines, arcs, or any desired shape)
-- Essential for tasks where the path matters (painting, welding, deburring)
-- Easier to specify obstacle avoidance constraints
+- Full control of the path of the gripper (a straight line, an arc, any shape)
+- Needed where the path is the task (painting, welding, deburring)
+- Obstacles are easier to describe
 
 **Disadvantages:**
-- Requires solving inverse kinematics at every time step (computationally expensive)
-- May encounter singularities during the motion
-- Joint velocities can become very large near singular configurations
-- No guarantee that joint limits are respected along the path
+- IK must be solved at every time step, which costs calculation
+- The path may pass through a singularity, and near one the joint velocities become very large
+- Nothing guarantees that the joints stay inside their limits along the path
 
-**Best for:** Motions where the Cartesian path is critical, such as descending vertically onto a box or following a shelf edge.
+**Best for:** motions where the path matters, such as a vertical descent onto a box.
 
 </TabItem>
 </Tabs>
 
 :::note[Practical Approach]
-Most industrial pick-and-place systems use a hybrid strategy. Joint-space planning handles large free-space motions (moving between shelf and conveyor), while task-space planning handles the critical approach and departure segments (vertical descent onto a box, straight-line lift after grasping).
+Most industrial pick-and-place systems use both: joint space for the large moves, task space for the short moves near the box.
 :::
 
 ### Linear Interpolation: The Simplest Trajectory
 
-The simplest trajectory linearly interpolates between start and goal:
+The simplest trajectory moves the joint at one constant velocity from start to goal. Call the joint position $q$ (in degrees or radians), its start value $q_0$, its goal value $q_f$, the time $t$ and the duration of the move $t_f$ (both in seconds):
 
 $$
 q(t) = q_0 + \frac{q_f - q_0}{t_f} \cdot t, \quad 0 \leq t \leq t_f
 $$
 
-The velocity is constant:
+The velocity $\dot{q}$ (the dot means "rate of change with time") is the distance divided by the duration:
 
 $$
 \dot{q}(t) = \frac{q_f - q_0}{t_f}
 $$
 
-The problem: velocity jumps from zero to a constant value at $t=0$ and back to zero at $t=t_f$. These discontinuities require infinite acceleration, which is physically impossible. Linear interpolation is useful only as a building block inside more sophisticated methods (like trapezoidal profiles).
+A move of $90°$ in 2 s has $\dot{q} = 90 / 2 = 45$ deg/s for the whole move. The problem is at the two ends. The velocity must jump from zero to 45 deg/s at $t=0$ and back to zero at $t=t_f$, and a jump in velocity needs an acceleration without limit. Linear interpolation is therefore used only as a part of better methods, such as the cruise part of the trapezoidal profile below.
 
 ### Cubic Polynomial Interpolation
 
-A cubic polynomial provides the minimum-degree trajectory that can satisfy four boundary conditions: position and velocity at both the start and end of the motion. This gives us smooth velocity transitions with zero velocity at the endpoints, which is exactly what we need for a robot that starts and stops at rest.
-
-The cubic polynomial trajectory is:
+To start and stop at rest, the trajectory must meet four conditions: the position and the velocity at the start, and the position and the velocity at the end. A cubic polynomial has four coefficients, $a_0$ to $a_3$, so it is the simplest curve that can meet all four:
 
 $$
 q(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3
 $$
 
-with velocity and acceleration:
+Its velocity $\dot{q}$ and its acceleration $\ddot{q}$ (two dots: the rate of change of the velocity) follow by differentiating:
 
 $$
 \dot{q}(t) = a_1 + 2a_2 t + 3a_3 t^2
@@ -157,7 +158,7 @@ $$
 
 #### Boundary Conditions
 
-For a rest-to-rest motion from $q_0$ to $q_f$ over time $t_f$:
+The four conditions are called boundary conditions. For a motion from rest at $q_0$ to rest at $q_f$ in a time $t_f$:
 
 $$
 q(0) = q_0, \quad q(t_f) = q_f, \quad \dot{q}(0) = 0, \quad \dot{q}(t_f) = 0
@@ -165,17 +166,15 @@ $$
 
 #### Coefficient Derivation
 
-Applying the boundary conditions:
-
-From $q(0) = q_0$:
+Each condition gives one equation. At $t = 0$ every term with $t$ vanishes, so $q(0) = q_0$ gives:
 
 $$a_0 = q_0$$
 
-From $\dot{q}(0) = 0$:
+and $\dot{q}(0) = 0$ gives:
 
 $$a_1 = 0$$
 
-From $q(t_f) = q_f$ and $\dot{q}(t_f) = 0$, solving the system:
+The two conditions at $t_f$ are two equations in $a_2$ and $a_3$. Their solution (worked out in the box below) is:
 
 $$
 a_2 = \frac{3(q_f - q_0)}{t_f^2}
@@ -184,6 +183,14 @@ $$
 $$
 a_3 = \frac{-2(q_f - q_0)}{t_f^3}
 $$
+
+**With numbers.** A joint moves from $0°$ to $90°$ in 2 s:
+
+$$
+a_2 = \frac{3 \times 90}{2^2} = 67.5 \text{ deg/s}^2, \qquad a_3 = \frac{-2 \times 90}{2^3} = -22.5 \text{ deg/s}^3
+$$
+
+The velocity is highest at the middle of the move, $t = 1$ s: $\dot{q} = 2(67.5)(1) + 3(-22.5)(1)^2 = 67.5$ deg/s. That is 1.5 times the 45 deg/s of the constant-velocity move, because the joint must make up for its slow start and slow end. The acceleration at the start is $\ddot{q}(0) = 2 a_2 = 135$ deg/s². It does not begin at zero: it jumps to 135 deg/s² at the first instant.
 
 <details>
 <summary>Full derivation of the coefficient system</summary>
@@ -242,13 +249,13 @@ $$
 
 ### Quintic Polynomial: Acceleration Continuity
 
-A quintic (5th-degree) polynomial provides six boundary conditions: position, velocity, and acceleration at both endpoints. This ensures the acceleration profile is also smooth at the start and end of the motion, which reduces jerk (the derivative of acceleration) and produces even gentler motion.
+The cubic leaves a jump in acceleration at each end, and a fragile load feels it. A quintic (5th-degree) polynomial has six coefficients, so it can meet six conditions: position, velocity and acceleration at both ends. With the acceleration set to zero at both ends, the push on the load grows from nothing and returns to nothing.
 
 $$
 q(t) = a_0 + a_1 t + a_2 t^2 + a_3 t^3 + a_4 t^4 + a_5 t^5
 $$
 
-For rest-to-rest motion with zero acceleration at endpoints ($q(0) = q_0$, $q(t_f) = q_f$, $\dot{q}(0) = \dot{q}(t_f) = 0$, $\ddot{q}(0) = \ddot{q}(t_f) = 0$):
+For a motion from rest to rest with zero acceleration at both ends ($q(0) = q_0$, $q(t_f) = q_f$, $\dot{q}(0) = \dot{q}(t_f) = 0$, $\ddot{q}(0) = \ddot{q}(t_f) = 0$), the coefficients are:
 
 $$
 a_0 = q_0, \quad a_1 = 0, \quad a_2 = 0
@@ -259,39 +266,30 @@ a_3 = \frac{10(q_f - q_0)}{t_f^3}, \quad a_4 = \frac{-15(q_f - q_0)}{t_f^4}, \qu
 $$
 
 :::note[When to use quintic over cubic]
-Use cubic polynomials when computational speed matters and moderate smoothness is acceptable. Use quintic polynomials when acceleration continuity is important, such as when the robot carries delicate payloads or when you need to chain multiple trajectory segments together without acceleration jumps at the boundaries.
+Use a cubic when a jump in acceleration at the two ends does no harm. Use a quintic when the robot carries a fragile load, or when several segments are joined and the acceleration must not jump where they meet.
 :::
 
 ### Trapezoidal Velocity Profile
 
-```text
-  Trapezoidal Velocity Profile
+A polynomial is given a duration, and its peak velocity and acceleration follow from it. A motor works the other way round: it has a largest velocity $v_{max}$ and a largest acceleration $a_{max}$, and the question is how fast the move can be. The answer is to use each limit fully: speed up at $a_{max}$, cruise at $v_{max}$, slow down at $a_{max}$. Plotted against time, the velocity has the shape of a trapezoid. No other motion inside the two limits is faster.
 
+```text
   velocity
     ^
-    |         +-----------------+
-  v_max ......|                 |..............
-    |        /|                 |\
-    |       / |                 | \
-    |      /  |                 |  \
-    |     /   |                 |   \
-    |    /    |                 |    \
-    |   /     |                 |     \
-    +--/------+-----------------+------\----> time
-    0  t_a                    t_a+t_c  t_f
+    |
+ v_max      +-------------------+
+    |      /                     \
+    |     /                       \
+    |    /                         \
+    |   /                           \
+    +--+----+-------------------+----+--> time
+       0   t_a               t_a+t_c t_f
 
-       Phase 1    Phase 2       Phase 3
-       Accel      Cruise        Decel
-       (a_max)    (v = v_max)   (-a_max)
-
-  If distance is too short to reach v_max,
-  the cruise phase vanishes and the profile
-  becomes triangular (accel then decel).
+       speed up    cruise     slow down
+       (+a_max)  (v = v_max)  (-a_max)
 ```
 
-In industrial applications, actuators have hard limits on maximum velocity and maximum acceleration. The trapezoidal velocity profile is the time-optimal trajectory under these constraints. It consists of three phases: constant acceleration, constant velocity (cruise), and constant deceleration. The velocity profile looks like a trapezoid when plotted against time.
-
-Given maximum velocity $v_{max}$ and maximum acceleration $a_{max}$, the motion from $q_0$ to $q_f$ (with $\Delta q = q_f - q_0 > 0$) has:
+For a move of size $\Delta q = q_f - q_0 > 0$, the three phases are:
 
 **Phase 1: Acceleration** ($0 \leq t \leq t_a$)
 
@@ -311,44 +309,52 @@ $$
 \dot{q}(t) = v_{max} - a_{max}(t - t_a - t_c)
 $$
 
-The timing parameters:
+The times follow from the limits. The time to speed up, $t_a$, is the velocity to reach divided by the acceleration. The cruise time $t_c$ covers the distance that the two ramps do not. The total time is $t_f$:
 
 $$
 t_a = \frac{v_{max}}{a_{max}}, \quad t_c = \frac{\Delta q}{v_{max}} - \frac{v_{max}}{a_{max}}, \quad t_f = 2t_a + t_c
 $$
 
+**With numbers.** A joint must move $90°$. Its motor allows $v_{max} = 60$ deg/s and $a_{max} = 120$ deg/s²:
+
+$$
+t_a = \frac{60}{120} = 0.5 \text{ s}, \qquad t_c = \frac{90}{60} - \frac{60}{120} = 1.5 - 0.5 = 1.0 \text{ s}, \qquad t_f = 2(0.5) + 1.0 = 2.0 \text{ s}
+$$
+
+No trajectory can make this move in less than 2.0 s with this motor. The cubic for the same move in 2.0 s needed 67.5 deg/s and 135 deg/s², which are both above the limits.
+
 :::caution[Triangular Profile Case]
-If the required distance $\Delta q$ is too short to reach $v_{max}$ before deceleration must begin, the cruise phase vanishes ($t_c = 0$) and the profile becomes triangular. This occurs when $\Delta q < \frac{v_{max}^2}{a_{max}}$. In this case, the peak velocity reached is $v_{peak} = \sqrt{a_{max} \cdot \Delta q}$ and the total time is $t_f = 2\sqrt{\frac{\Delta q}{a_{max}}}$.
+A short move ends before the joint reaches $v_{max}$. There is no cruise ($t_c = 0$) and the profile is a triangle. This occurs when $\Delta q < \frac{v_{max}^2}{a_{max}}$, which is $60^2 / 120 = 30°$ for the motor above. The peak velocity is then $v_{peak} = \sqrt{a_{max} \cdot \Delta q}$ and the total time is $t_f = 2\sqrt{\frac{\Delta q}{a_{max}}}$.
 :::
 
 <Card title="S-Curve Profiles: Adding a Jerk Limit" icon="information">
-A trapezoidal profile has discontinuous acceleration at four places (start of accel, start of cruise, start of decel, end of decel). Each jump is an instantaneous step in acceleration, which means **infinite jerk** ($\dddot{q}$). For delicate payloads (electronics, surgical tools, full cups of liquid) this is unacceptable: the sudden acceleration change feels like a hammer blow at the attachment.
+In a trapezoidal profile the acceleration jumps at four places: at the start and the end of each ramp. Each jump is a jerk ($\dddot{q}$) without limit. For a fragile load (electronics, a surgical tool, a full cup of liquid) the jump is felt as a knock.
 
-The fix is the **S-curve** (or seven-segment) profile, which adds constant-jerk ramps to each corner of the trapezoid. The velocity curve has a characteristic S shape at each end. You specify a third limit $j_{\max}$ alongside $v_{\max}$ and $a_{\max}$, and the profile smoothly ramps acceleration up to $a_{\max}$, cruises at constant $a$, ramps back to zero, cruises at $v_{\max}$, and mirrors the pattern for deceleration. Most industrial motion controllers (Siemens SIMATIC, Rockwell Kinetix, Beckhoff TwinCAT) ship with S-curve profile generators; implement one yourself only if you need custom behavior.
+The **S-curve** (or seven-segment) profile removes the jumps. It has a third limit, $j_{\max}$, on the jerk. The acceleration rises to $a_{\max}$ along a ramp, holds, and returns to zero along a ramp, so each end of the velocity curve is rounded into an S shape. Most industrial motion controllers (Siemens SIMATIC, Rockwell Kinetix, Beckhoff TwinCAT) include S-curve generators.
 </Card>
 
 <Card title="Beyond Trapezoidal: TOPP for Time-Optimal Paths" icon="rocket">
-The trapezoidal profile is time-optimal **for one joint at a time**. For a full robot following a Cartesian path, the binding constraint at each point along the path is usually a different joint (or a different axis of the task frame), and the joint velocity / acceleration / torque limits are themselves configuration-dependent. Computing a true time-optimal profile under all these constraints simultaneously is a classical problem solved by **Time-Optimal Path Parameterization** (TOPP).
+The trapezoidal profile is the fastest motion **for one joint at a time**. When a whole arm follows a path in task space, a different joint reaches its limit at each point of the path. Finding the fastest timing along a fixed path under all the limits together is called **Time-Optimal Path Parameterization** (TOPP).
 
-The current industrial standard is **TOPP-RA** (Pham & Pham, 2017): it discretizes the geometric path and solves a sequence of small linear programs to find the fastest possible time parameterization under joint-velocity, joint-acceleration, and optionally joint-torque bounds. You will find it in [toppra (Python)](https://hungpham2511.github.io/toppra/), [Drake](https://drake.mit.edu/), and as the `contopp` option in MATLAB's Robotics System Toolbox. If the question "how do I make this trajectory 10 percent faster without exceeding limits?" comes up, this is the tool.
+A widely used method is **TOPP-RA** (Pham & Pham, 2017). It is available in [toppra (Python)](https://hungpham2511.github.io/toppra/), [Drake](https://drake.mit.edu/), and as the `contopp` option in MATLAB's Robotics System Toolbox.
 </Card>
 
 ### Spline Interpolation Through Multiple Waypoints
 
-When a trajectory must pass through multiple via points (for example, a sequence of shelf locations), we connect consecutive pairs with cubic polynomials and enforce continuity of position, velocity, and acceleration at each via point. This produces a cubic spline trajectory.
+Often the arm must pass through several points on the way, called waypoints or via points (for example, a row of shelf locations). A separate rest-to-rest cubic between each pair of points would make the arm stop at every point. A cubic spline joins the cubics so that the arm passes through each point without stopping.
 
-For $n+1$ waypoints $q_0, q_1, \ldots, q_n$ at times $t_0, t_1, \ldots, t_n$, we construct $n$ cubic segments. At each interior waypoint $k$, we require:
+For $n+1$ waypoints $q_0, q_1, \ldots, q_n$ at times $t_0, t_1, \ldots, t_n$, there are $n$ cubic segments. At each waypoint $k$ between the first and the last, the segment that arrives and the segment that leaves must agree in three things:
 
-1. **Position continuity:** The segment ending at $q_k$ and the segment starting at $q_k$ agree on the position value.
-2. **Velocity continuity:** $\dot{q}_{k}^{-} = \dot{q}_{k}^{+}$ (velocity from the left equals velocity from the right).
-3. **Acceleration continuity:** $\ddot{q}_{k}^{-} = \ddot{q}_{k}^{+}$ (acceleration matches across the boundary).
+1. **Position:** both segments pass through $q_k$.
+2. **Velocity:** $\dot{q}_{k}^{-} = \dot{q}_{k}^{+}$ (the velocity just before the waypoint equals the velocity just after it).
+3. **Acceleration:** $\ddot{q}_{k}^{-} = \ddot{q}_{k}^{+}$.
 
-With boundary conditions $\dot{q}(t_0) = 0$ and $\dot{q}(t_n) = 0$ (natural spline with rest at endpoints), this forms a tridiagonal linear system that can be solved efficiently.
+Add rest at the two ends, $\dot{q}(t_0) = 0$ and $\dot{q}(t_n) = 0$, and there are as many equations as unknown coefficients. Each waypoint is linked only to its two neighbors (a tridiagonal system), so a computer solves the equations quickly.
 
 <details>
 <summary>Via-point velocity estimation</summary>
 
-When time-stamps are given but intermediate velocities are not specified, a common heuristic is to set the velocity at each interior via point to the average of the linear velocities on either side:
+When the times of the via points are given but their velocities are not, a common rule is to give each inner via point the average of the two straight-line velocities on either side of it:
 
 $$
 \dot{q}_k = \frac{1}{2}\left(\frac{q_k - q_{k-1}}{t_k - t_{k-1}} + \frac{q_{k+1} - q_k}{t_{k+1} - t_k}\right)
@@ -382,67 +388,65 @@ stateDiagram-v2
     ReturnHome: Return home\n(joint-space)
 ```
 
-A complete pick-and-place operation is a sequence of trajectory segments, each designed for a specific purpose. The segments are connected end-to-end with matching positions and velocities at the transition points. Here is the full phase breakdown for our warehouse manipulator.
+A pick-and-place operation is a chain of segments, each with its own kind of trajectory. Each segment starts at the position where the one before it ended. The home configuration is the pose where the arm waits between cycles.
 
 <Steps>
 1. **Move to approach position**
-   Joint-space cubic polynomial from the home configuration to a position above the target box. This is a large free-space motion where the Cartesian path does not matter.
+   A joint-space cubic from the home configuration to a position above the box. This is a large move through free space, and the path of the gripper does not matter.
 
 2. **Descend to object**
-   Task-space straight-line descent (vertical) from the approach position to the grasp position. This uses Cartesian trajectory planning with IK at each step to ensure the gripper approaches the box from directly above.
+   A straight vertical line in task space, from the approach position down to the grasp position, with IK at each step. The gripper meets the box from directly above.
 
 3. **Grasp**
-   Close the gripper. The arm holds position while the gripper actuates. Typical dwell time: 200-500 ms.
+   The arm holds still while the gripper closes. This pause is called a dwell, typically 200 to 500 ms.
 
 4. **Lift**
-   Task-space straight-line vertical lift to a safe clearance height above the shelf. This prevents the box from clipping the shelf edge.
+   A straight vertical line in task space, up to a safe height above the shelf, so that the box does not catch the shelf edge.
 
 5. **Transport**
-   Joint-space trajectory from the lifted position above the shelf to a position above the conveyor. This is the longest segment and should use a trapezoidal velocity profile for time-optimal motion.
+   A joint-space move from above the shelf to above the conveyor. It is the longest segment, so it uses a trapezoidal velocity profile, the fastest the motors allow.
 
 6. **Lower to placement**
-   Task-space straight-line descent to the conveyor placement position.
+   A straight vertical line in task space, down to the place position on the conveyor.
 
 7. **Release**
-   Open the gripper. Dwell time: 200-500 ms.
+   The gripper opens. Dwell: 200 to 500 ms.
 
 8. **Return home**
-   Joint-space trajectory back to the home configuration, ready for the next cycle.
+   A joint-space move to the home configuration, ready for the next cycle.
 </Steps>
 
 ### Via Points and Blending
 
-In practice, stopping at every via point (zero velocity) wastes time. Via-point blending replaces the stop-and-go transitions with smooth curves that pass near (but not exactly through) the via points. The robot trades a small amount of path accuracy for significant cycle time improvement.
+A full stop at every via point wastes time. Blending rounds the corner: the arm passes near the via point, not exactly through it, and does not stop. The robot gives up a little accuracy of the path and gains cycle time.
 
-A common blending approach defines a blend radius $r$ around each via point. Within the blend region, a parabolic (or circular) curve replaces the linear segment. Outside the blend regions, the robot follows the original straight-line segments at cruise velocity. The blend radius is chosen as a trade-off between path accuracy and transition smoothness.
+A common method sets a blend radius $r$ around each via point. Inside that distance, a curve (a parabola or an arc) replaces the corner. Outside it, the arm follows the straight segments at cruise velocity. A larger radius gives a smoother and faster corner that passes farther from the via point.
 
 ### Cartesian Straight-Line Motion
 
-For task-space segments (descent, lift, placement), we generate a straight line in Cartesian space and convert to joint trajectories using the Jacobian, introduced in [Velocity Kinematics and the Jacobian](./velocity-kinematics-jacobian).
-
-Given a desired Cartesian velocity $\dot{\mathbf{x}}$, the required joint velocities are:
+For the task-space segments (descent, lift, placement) the gripper must follow a straight line, but the motors turn joints. The link between the two is the Jacobian $J$, a matrix that converts joint velocities to the velocity of the gripper (see [Velocity Kinematics and the Jacobian](/education/robotics/velocity-kinematics-jacobian/)). Used in reverse, it gives the joint velocities $\dot{\mathbf{q}}$ needed for a wanted gripper velocity $\dot{\mathbf{x}}$:
 
 $$
 \dot{\mathbf{q}} = J(\mathbf{q})^{-1} \dot{\mathbf{x}}
 $$
 
-Or using the pseudoinverse for redundant robots:
+An arm with more joints than the task needs (a redundant arm) has no ordinary inverse, and uses the pseudoinverse $J^{\dagger}$ in its place:
 
 $$
 \dot{\mathbf{q}} = J^{\dagger}(\mathbf{q}) \dot{\mathbf{x}}
 $$
 
-The trajectory is generated by discretizing the Cartesian path into small steps and solving IK (or using the resolved-rate method above) at each step.
+The straight line is cut into small steps, and at each step the joint values come from IK or from the formula above.
 
 <Card title="What If the Cartesian Path Is Infeasible?" icon="warning">
-A straight line in Cartesian space can demand joint velocities above actuator limits, especially near the workspace boundary or near a singularity where small Cartesian motion requires large joint motion. Before executing a task-space trajectory, validate it by sweeping along the path at your planned speed, computing $\dot{\mathbf{q}} = J^{\dagger} \dot{\mathbf{x}}$ at each step, and checking that every joint stays within `[-v_max, v_max]` and every acceleration stays within `[-a_max, a_max]`.
+A straight line for the gripper can ask for joint velocities above the motor limits. This occurs near the edge of the workspace and near a singularity, where a small motion of the gripper needs a large motion of the joints. So check a task-space trajectory before it runs. Step along the path at the planned speed, calculate $\dot{\mathbf{q}} = J^{\dagger} \dot{\mathbf{x}}$ at each step, and confirm that every joint velocity stays within `[-v_max, v_max]` and every joint acceleration within `[-a_max, a_max]`.
 
-If any step violates limits, you have three practical options:
-1. **Slow the trajectory globally**: reduce the Cartesian cruise velocity until the worst joint is within limits. Easy to implement, costs time.
-2. **Reparameterize using TOPP**: find the time-optimal speed profile along the fixed geometric path. Best if the path shape must be preserved.
-3. **Replan the path**: move the via points away from the singular region, sacrificing a straight line for a curved but feasible motion. Best when the Cartesian shape is flexible.
+If a step breaks a limit, there are three remedies:
+1. **Slow the whole trajectory**: reduce the cruise velocity of the gripper until the worst joint is inside its limits. Easy to do, and it costs time.
+2. **Retime with TOPP**: find the fastest speed profile along the same path. Best if the shape of the path must stay.
+3. **Replan the path**: move the via points away from the singularity and accept a curve in place of the straight line. Best when the shape may change.
 
-Silently commanding unreachable velocities will either produce a tracking error (the robot falls behind) or trip the controller's safety limits and halt the motion mid-task.
+If the controller is given velocities the motors cannot reach, the robot falls behind the plan, or the safety limits of the controller stop the motion in the middle of the task.
 </Card>
 
 ### Python Implementation: Cubic Polynomial Trajectory
@@ -564,7 +568,7 @@ print(f"Quintic - peak accel: {np.degrees(max(abs(qdd_q))):.1f} deg/s²")
 ```
 
 :::note[Key Observation]
-The cubic polynomial has discontinuous acceleration at the start and end (nonzero jumps). The quintic polynomial starts and ends with zero acceleration, producing a smoother jerk profile. The trade-off is that the quintic has a slightly higher peak velocity and peak acceleration for the same motion duration.
+The acceleration of the cubic jumps at the start and at the end. The quintic starts and ends with zero acceleration. The price is a higher peak velocity for the same duration: $1.875\,\Delta q / t_f$ against $1.5\,\Delta q / t_f$ for the cubic, 25% more. The peak acceleration is about the same ($5.77\,\Delta q / t_f^2$ against $6\,\Delta q / t_f^2$). For the $90°$ move in 2 s, the program prints 67.5 deg/s and 135.0 deg/s² for the cubic, and 84.4 deg/s and 129.9 deg/s² for the quintic.
 :::
 
 ### Python Implementation: Trapezoidal Velocity Profile
@@ -764,6 +768,7 @@ def plan_pick_and_place():
         t_offset += duration
 
     # Rebuild cleanly
+    # (The loop above was a first attempt. The lists are emptied and filled again here.)
     all_t = []
     all_q = [[], [], []]
     t_offset = 0.0
@@ -914,20 +919,20 @@ for name, (t, q, qd, qdd) in methods.items():
 <InArticleAd />
 
 
-We now apply the trajectory planning tools to our warehouse mobile manipulator. The robot must pick a box from a shelf at height 1.2 m and place it on a conveyor at height 0.8 m. The arm has actuator limits of 120 deg/s maximum joint velocity and 300 deg/s² maximum joint acceleration. The target cycle time is under 8 seconds.
+The warehouse robot must pick a box from a shelf at a height of 1.2 m and place it on a conveyor at 0.8 m. Each joint motor allows at most 120 deg/s and 300 deg/s². The cycle must take less than 8 seconds.
 
-**Trajectory strategy for each phase:**
+**Trajectory for each phase:**
 
-| Phase | Planning Space | Method | Rationale |
+| Phase | Planning Space | Method | Reason |
 |-------|---------------|--------|-----------|
-| Move to approach | Joint space | Trapezoidal | Time-optimal, large motion |
-| Descend to object | Task space | Cubic polynomial | Smooth vertical descent, short distance |
+| Move to approach | Joint space | Trapezoidal | Large move, fastest profile |
+| Descend to object | Task space | Cubic polynomial | Short, straight and smooth |
 | Grasp (dwell) | None | Hold position | Gripper closes |
-| Lift | Task space | Cubic polynomial | Smooth vertical lift |
-| Transport | Joint space | Trapezoidal | Time-optimal, longest segment |
-| Lower to placement | Task space | Cubic polynomial | Smooth vertical descent |
+| Lift | Task space | Cubic polynomial | Straight and smooth |
+| Transport | Joint space | Trapezoidal | Longest move, fastest profile |
+| Lower to placement | Task space | Cubic polynomial | Straight and smooth |
 | Release (dwell) | None | Hold position | Gripper opens |
-| Return home | Joint space | Trapezoidal | Time-optimal return |
+| Return home | Joint space | Trapezoidal | Fastest profile |
 
 **Cycle time budget:**
 
@@ -943,22 +948,22 @@ We now apply the trajectory planning tools to our warehouse mobile manipulator. 
 | Return home | 1.5 s |
 | **Total** | **7.3 s** |
 
-This is within the 8-second target. The transport phase dominates the cycle time, so optimizing this segment (higher cruise velocity, shorter acceleration time) has the greatest impact on throughput.
+The total is inside the 8-second target. The transport phase is the largest part, so a higher cruise velocity or a shorter ramp there saves the most time.
 
 <details>
 <summary>Improving cycle time further</summary>
 
-Several strategies can reduce cycle time below 7 seconds:
+Four ways to bring the cycle below 7 seconds:
 
-1. **Overlap phases:** Begin closing the gripper while the arm is still completing the final descent. This saves 100-200 ms.
-2. **Via-point blending:** Instead of coming to a full stop at the approach position, blend through it at reduced speed. The arm follows a smooth curve that passes close to the approach point without stopping.
-3. **Increase actuator limits:** Higher-torque motors allow larger $a_{max}$, which shortens the acceleration and deceleration phases of trapezoidal profiles.
-4. **Optimize waypoint placement:** Position the approach and lift waypoints closer to the grasp point to minimize the descent and lift distances.
+1. **Overlap phases:** start to close the gripper while the arm finishes its descent. This saves 100 to 200 ms.
+2. **Blend the via points:** pass close to the approach position on a smooth curve, without a stop.
+3. **Raise the motor limits:** more torque allows a larger $a_{max}$ and shorter ramps.
+4. **Move the waypoints:** put the approach and lift positions closer to the grasp point.
 
 </details>
 
 :::tip[Instrument it]
-A planned trajectory is open-loop until the robot can measure what it actually did. Put an encoder on each joint (a magnetic AS5600, or an optical quadrature encoder) to track the following error between the planned and the real path, and sense each motor's current (an INA226 or ACS712) so a collision shows up as a torque spike. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) reads both, closes the loop, and can [stop the arm](https://siliconwit.io) the instant the current says it hit something.
+A planned trajectory is only a plan until the robot measures what it did. Put an encoder on each joint (a magnetic AS5600, or an optical quadrature encoder) to track the following error, the difference between the planned and the real position. Sense the current of each motor (an INA226 or ACS712), so that a collision shows as a sudden rise in torque. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) reads both, closes the loop, and can [stop the arm](https://siliconwit.io) the instant the current says it hit something.
 :::
 
 ## Design Guidelines
@@ -968,19 +973,19 @@ A planned trajectory is open-loop until the robot can measure what it actually d
 
 <CardGrid>
   <Card title="Match Method to Phase" icon="setting">
-    Use trapezoidal velocity profiles for long free-space motions where time matters. Use polynomial interpolation for short, precise segments where smoothness is critical. Use task-space planning only when the Cartesian path is important (approach, descent, straight-line segments).
+    Use a trapezoidal profile for long moves through free space, and a polynomial for short, exact segments. Plan in task space only when the path of the gripper matters.
   </Card>
 
   <Card title="Always Check Actuator Limits" icon="warning">
-    After generating any trajectory, compute the required joint velocities and accelerations and verify they are within the actuator ratings. For polynomial trajectories, the peak velocity and acceleration depend on the motion distance and duration. Shorter durations produce higher peaks.
+    After you generate a trajectory, calculate its peak joint velocity and acceleration and compare them with the motor ratings. For a polynomial, the peaks depend on the distance and the duration: half the duration gives twice the velocity and four times the acceleration.
   </Card>
 
   <Card title="Prefer Quintic for Delicate Payloads" icon="approve-check">
-    When carrying fragile items (electronics, glass, food products), use quintic polynomials to ensure zero jerk at segment transitions. The additional computational cost is negligible compared to the cost of dropped or damaged goods.
+    For fragile items (electronics, glass, food), use quintic polynomials, so that the acceleration is zero and does not jump where segments meet. The extra calculation costs far less than a dropped or damaged item.
   </Card>
 
   <Card title="Test Blending Radii in Simulation" icon="setting">
-    Via-point blending trades path accuracy for speed. Always simulate the blended path and verify the maximum deviation from the nominal via points. For our warehouse application, a maximum deviation of 20 mm at via points is typically acceptable; for precision assembly, it may need to be under 0.1 mm.
+    Simulate the blended path and measure how far it passes from each via point. For the warehouse robot, 20 mm is usually acceptable. Precision assembly may need under 0.1 mm.
   </Card>
 </CardGrid>
 
@@ -990,24 +995,24 @@ A planned trajectory is open-loop until the robot can measure what it actually d
 
 
 <CardGrid>
-  <Card title="Trajectory Planning Fundamentals" icon="open-book">
-    Joint-space planning is simple and singularity-free, while task-space planning provides Cartesian path control. Industrial systems combine both: joint-space for free motions, task-space for critical approach and departure segments.
+  <Card title="Path and trajectory" icon="open-book">
+    A path says where. A trajectory says where and when, and so it fixes the velocity and the acceleration that the motors must give.
   </Card>
 
-  <Card title="Polynomial Interpolation" icon="open-book">
-    Cubic polynomials satisfy four boundary conditions (position and velocity at endpoints) and are the standard for smooth point-to-point motions. Quintic polynomials add acceleration continuity for even smoother transitions.
+  <Card title="Joint space and task space" icon="open-book">
+    Plan in joint space for free moves. Plan in task space where the gripper must follow a line, and check the joint velocities it asks for.
   </Card>
 
-  <Card title="Trapezoidal Profiles" icon="open-book">
-    The trapezoidal velocity profile is time-optimal under velocity and acceleration constraints. It handles both the normal trapezoidal case (cruise phase present) and the degenerate triangular case (short distances).
+  <Card title="Polynomials" icon="open-book">
+    A cubic starts and stops at rest, with a jump in acceleration at each end. A quintic removes the jump, and its peak velocity is 25% higher.
   </Card>
 
-  <Card title="Pick-and-Place Sequencing" icon="open-book">
-    A complete pick-and-place cycle is a sequence of trajectory segments, each chosen for its specific purpose. Proper phase sequencing, dwell times, and via-point blending determine the achievable cycle time and reliability.
+  <Card title="Trapezoidal profile" icon="open-book">
+    It is the fastest move inside a velocity limit and an acceleration limit. A short move never reaches the velocity limit, and the profile becomes a triangle.
   </Card>
 </CardGrid>
 
-**Next lesson:** We build complete Python robot simulations with 3D visualization, then connect the kinematic and trajectory planning tools from this course to real-world applications in manufacturing, logistics, medical robotics, and agricultural automation.
+**Next lesson:** [Robot Simulation and Practical Applications](/education/robotics/robot-simulation-applications/) puts the kinematics and the trajectories of this course into one Python simulator, and shows how to check a simulator against a real arm.
 
 
 

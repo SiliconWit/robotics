@@ -26,7 +26,7 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
 
 import PodcastEmbed from '../../../../components/PodcastEmbed.astro';
 
-Quaternions provide a compact, singularity-free representation of 3D orientation that is essential for smooth robotic motion. This lesson builds from Euler angle limitations through quaternion algebra to practical SLERP interpolation, applied to drone gimbal stabilization and surgical tool positioning. #robotics #quaternions #orientation-control
+Tilt a drone camera until it looks straight down, and the picture can start to spin while the motors jerk. A robot wrist can do the same in the middle of a weld. Nothing is broken. The fault is in how the orientation is stored: as three angles, which fail at one pose. This lesson shows why they fail and what to store in their place: a quaternion, four numbers that describe one turn about one axis. You will use it to hold a drone camera steady and to move a tool smoothly from one orientation to another. #robotics #quaternions #orientation-control
 
 <PodcastEmbed src="https://open.spotify.com/episode/1khwI5dNHsHDBZKMOrwKCt?si=qGHKuTQqS82z6dHmhabKFw" />
 
@@ -45,44 +45,17 @@ By the end of this lesson, you will be able to:
 <InArticleAd />
 
 
-Camera drones must maintain a stable, level camera view regardless of the vehicle body tilting during aggressive maneuvers. Surgical robots must smoothly reorient their end-effector tools between arbitrary orientations without sudden jumps or loss of controllable degrees of freedom. Both problems demand an orientation representation that handles arbitrary 3D rotations continuously and predictably, something Euler angles fundamentally cannot guarantee.
-
-### Representative Systems
-
-**Orientation-Critical Robotic Applications:**
-- **Camera Gimbals** (drones, handheld stabilizers): maintaining level horizon during rapid platform motion
-- **Surgical Robots** (da Vinci, ROSA): smooth tool reorientation inside constrained anatomical spaces
-- **Spacecraft Attitude Control** (reaction wheels, CMGs): pointing solar panels and antennas accurately
-- **Industrial Robot Welding**: maintaining torch angle along curved seam paths
-- **Humanoid Robot Heads**: smooth gaze tracking without jerky eye or neck motion
-- **Underwater ROVs**: stable sensor orientation despite current disturbances
+A camera drone tilts and turns in the wind, and the camera must stay level. A gimbal does this work: it is a mount with three motors, one inside the next, that turns the camera against the motion of the drone body. A surgical robot has a similar task. It must turn its tool from one orientation to another with no sudden jump. Both machines need a way to store an orientation that works at every pose.
 
 ### The Orientation Control Challenge
 
-These systems require precise, continuous control of:
-
-:::note[Critical Orientation Requirements]
-- **Singularity-free representation** that works at all orientations without gimbal lock
-- **Smooth interpolation** between orientations for natural, jerk-free motion
-- **Efficient composition** of sequential rotations for real-time control loops
-- **Minimal storage** (4 parameters vs. 9 for rotation matrices)
-- **Numerical stability** under repeated multiplication and normalization
-:::
-
-> **Engineering Question:** How do we represent and interpolate 3D orientations so that a drone gimbal or surgical tool can smoothly transition between any two orientations without losing a degree of freedom?
+> **Engineering Question:** How do we store an orientation, and move between two orientations, so that a drone gimbal or a surgical tool never loses the ability to turn in some direction?
 
 ### Why Not Just Use Euler Angles Everywhere?
 
-Euler angles (roll, pitch, yaw) are intuitive for small rotations and human communication. However, they suffer from gimbal lock: a configuration where two rotation axes align and the system loses one degree of freedom. For a drone gimbal pitched to exactly 90 degrees, roll and yaw become indistinguishable, making smooth control impossible at that configuration. Quaternions solve this problem completely.
+The familiar way to store an orientation is three angles: yaw (turn left or right), pitch (tilt up or down) and roll (lean sideways). They are called Euler angles. People read them easily, and for small turns they work well.
 
-### Consequences of Poor Orientation Representation
-
-**What Goes Wrong Without Quaternions:**
-- **Gimbal lock** causes sudden loss of control authority at specific orientations
-- **Euler angle interpolation** produces curved, non-intuitive paths through orientation space
-- **Rotation matrix accumulation** drifts from orthogonality due to floating-point errors
-- **Discontinuous motion** when switching between Euler angle branches
-- **Computational overhead** from re-orthogonalizing 3x3 matrices every control cycle
+They have one weak pose. The three turns are made one after another, each about its own axis. When the middle turn reaches 90 degrees, the axis of the first turn and the axis of the third turn point along the same line. Two motors now do the same thing, and one direction of turning is lost. This pose has a name: gimbal lock. Near it, the motors must spin very fast to make a small turn. A quaternion does not have such a pose.
 
 ## Fundamental Theory: Quaternion-Based Orientation
 
@@ -91,15 +64,19 @@ Euler angles (roll, pitch, yaw) are intuitive for small rotations and human comm
 
 ### Euler Angles Review: Roll, Pitch, Yaw
 
-Euler angles describe a 3D orientation as three sequential rotations about specified axes. For the full derivation of rotation matrices and how they compose, see [3D Rotation Matrices and Spatial Transformations](/education/spatial-mechanics/spatial-rotations-transformations/). The most common convention in robotics and aerospace is the ZYX (yaw-pitch-roll) sequence: first rotate about the Z-axis by yaw angle $\psi$, then about the new Y-axis by pitch angle $\theta$, then about the newest X-axis by roll angle $\phi$.
+Euler angles describe an orientation as three turns made one after another. The most common order in robotics and aerospace is ZYX:
 
-The combined rotation matrix for ZYX Euler angles is:
+1. Turn about the Z-axis (the vertical axis) by the yaw angle $\psi$.
+2. Turn about the Y-axis, in the position the first turn left it, by the pitch angle $\theta$.
+3. Turn about the X-axis, in the position the first two turns left it, by the roll angle $\phi$.
+
+The three angles are in degrees or radians. Each turn can be written as a rotation matrix, a 3 by 3 table of numbers that turns a vector (see [3D Rotation Matrices and Spatial Transformations](/education/spatial-mechanics/spatial-rotations-transformations/)). Multiplying the three matrices gives one matrix for the whole orientation:
 
 $$
 R_{ZYX} = R_Z(\psi) \, R_Y(\theta) \, R_X(\phi)
 $$
 
-Expanding each matrix:
+Written out in full (the next part uses it):
 
 $$
 R_{ZYX} = \begin{bmatrix}
@@ -110,38 +87,32 @@ R_{ZYX} = \begin{bmatrix}
 $$
 
 :::note[Euler Angle Conventions]
-There are 12 possible Euler angle conventions (XYZ, ZYX, ZXZ, etc.). Robotics commonly uses ZYX (yaw-pitch-roll) or XYZ. Aerospace often uses ZYX. Always verify which convention your software library uses before combining angles from different sources.
+There are 12 possible orders of the three turns (XYZ, ZYX, ZXZ and others). The same three numbers mean a different orientation in a different order, so check which order your software library uses before you combine angles from two sources.
 :::
 
 ### The Gimbal Lock Problem
 
+Think of a drone gimbal as three rings, one inside the next: the yaw ring outside, the pitch ring in the middle, and the roll ring inside, holding the camera. The pitch ring carries the roll axis with it.
+
 ```text
-  Gimbal Lock: Three Nested Rings
+  Pitch = 0                        Pitch = 90 degrees
 
-  Normal Operation (pitch != 90)        Gimbal Lock (pitch = 90)
+     yaw axis                         yaw axis
+        |                                |
+        |                                |
+        +-------> roll axis              +
+       /                                /|
+      /                                / |
+  pitch axis                   pitch  /  v roll axis
+                               axis
 
-       +--- yaw ring ---+                 +--- yaw ring ---+
-       |                 |                 |                 |
-       | +- pitch ring + |                 | +- pitch ring + |
-       | |             | |                 | |      |      | |
-       | | +- roll -+  | |                 | | +- roll -+  | |
-       | | | camera |  | |                 | | | camera |  | |
-       | | +--------+  | |                 | | +--------+  | |
-       | +-------------+ |                 | +------+------+ |
-       +-----------------+                 +--------+--------+
-                                                    |
-       3 independent axes                  yaw and roll axes
-       = 3 DOF                             now PARALLEL = 2 DOF
-                                           (1 DOF lost)
+  3 axes in 3 directions           yaw and roll on one line
+  3 directions of turning          2 directions of turning
 ```
 
-Gimbal lock occurs when the middle rotation in an Euler angle sequence reaches $\pm 90°$, causing the first and third rotation axes to align. At this configuration, the three-parameter representation effectively collapses to two parameters, and one degree of rotational freedom becomes uncontrollable.
+When the pitch ring turns $90°$, the roll axis points straight down, along the yaw axis. The yaw motor and the roll motor now turn the camera in the same way, and no motor can turn it about the third direction. One degree of freedom (one independent direction of motion) is lost. This is gimbal lock. It occurs in any Euler angle sequence when the middle turn reaches $\pm 90°$.
 
-**Physical Explanation:**
-
-Consider a drone gimbal with three nested rings (yaw, pitch, roll). When the pitch axis rotates to exactly $90°$, the yaw ring and roll ring become parallel. Rotating either one produces the same motion. The system has "lost" the ability to independently control all three orientation components.
-
-**Mathematically**, when $\theta = 90°$ in the ZYX convention:
+The matrix shows the same thing. Put $\theta = 90°$ into $R_{ZYX}$, so that $\cos\theta = 0$ and $\sin\theta = 1$:
 
 $$
 R_{ZYX}\big|_{\theta=90°} = \begin{bmatrix}
@@ -151,7 +122,7 @@ R_{ZYX}\big|_{\theta=90°} = \begin{bmatrix}
 \end{bmatrix}
 $$
 
-Using trigonometric identities:
+The identities $\sin(a - b) = \sin a\cos b - \cos a\sin b$ and $\cos(a - b) = \cos a\cos b + \sin a\sin b$ shorten each entry:
 
 $$
 R_{ZYX}\big|_{\theta=90°} = \begin{bmatrix}
@@ -161,12 +132,13 @@ R_{ZYX}\big|_{\theta=90°} = \begin{bmatrix}
 \end{bmatrix}
 $$
 
-Notice that only the **difference** $(\phi - \psi)$ appears. We can change $\phi$ and $\psi$ independently, but the rotation matrix only depends on their difference. One degree of freedom has been lost.
+Only the difference $\phi - \psi$ appears. Yaw $40°$ with roll $30°$ gives the same matrix as yaw $50°$ with roll $40°$, because $30° - 40° = 40° - 50° = -10°$. Two motors turn, but only one number of the orientation changes. The program below checks this.
 
 ```python
 # Demonstrating gimbal lock with Euler angles
 import numpy as np
 from scipy.spatial.transform import Rotation
+# 'ZYX' in capital letters: each turn is about the axis as the earlier turns left it
 
 # Normal case: pitch = 45 degrees (no gimbal lock)
 r_normal = Rotation.from_euler('ZYX', [30, 45, 20], degrees=True)
@@ -191,13 +163,15 @@ print(f"  (Both have yaw-roll = 10°, producing identical orientations)")
 
 ### Quaternion Definition
 
-A quaternion is a four-dimensional number system that extends complex numbers. A general quaternion $\mathbf{q}$ has one real (scalar) part and three imaginary (vector) parts:
+Any orientation can be reached from any other by a single turn: choose the right axis, and turn about it by the right angle. A quaternion stores that single turn in four numbers. One number carries the size of the angle, and three carry the direction of the axis. Because it stores one turn, and not three turns in a row, there is no middle turn that can bring two axes onto one line. Gimbal lock cannot occur.
+
+The four numbers also follow rules of multiplication, and these rules let a program combine two turns into one. A quaternion $\mathbf{q}$ has one ordinary number $w$ (the scalar part) and three more, $x$, $y$ and $z$ (the vector part). None of them has a unit:
 
 $$
 \mathbf{q} = w + x\,\mathbf{i} + y\,\mathbf{j} + z\,\mathbf{k}
 $$
 
-where $\mathbf{i}$, $\mathbf{j}$, $\mathbf{k}$ are the fundamental quaternion units satisfying:
+The symbols $\mathbf{i}$, $\mathbf{j}$, $\mathbf{k}$ mark the three places of the vector part. They behave like the imaginary unit of complex numbers, but there are three of them:
 
 $$
 \mathbf{i}^2 = \mathbf{j}^2 = \mathbf{k}^2 = \mathbf{i}\,\mathbf{j}\,\mathbf{k} = -1
@@ -217,62 +191,51 @@ A quaternion is often written as $\mathbf{q} = [w, \mathbf{v}]$ where $w$ is the
 :::
 
 :::note[Hamilton vs JPL: Two Quaternion Conventions]
-The multiplication rules above ($\mathbf{i}\mathbf{j} = \mathbf{k}$, $\mathbf{i}\mathbf{j}\mathbf{k} = -1$) are the **Hamilton** convention. A second convention, commonly called **JPL** or **Shuster**, flips the sign of the cross-product term in quaternion multiplication and satisfies $\mathbf{i}\mathbf{j}\mathbf{k} = +1$. It survives mostly in aerospace attitude control (spacecraft, some IMU drivers).
-
-For robotics this distinction matters because most robotics libraries use Hamilton: SciPy `Rotation`, Eigen, ROS `tf2`, MoveIt, and Drake. If you pull quaternions from a spacecraft dataset or an older IMU driver, check which convention it uses; converting a JPL quaternion into a Hamilton library will give you the inverse rotation, silently. The rest of this lesson uses Hamilton throughout.
+The rules above ($\mathbf{i}\mathbf{j} = \mathbf{k}$, $\mathbf{i}\mathbf{j}\mathbf{k} = -1$) are the **Hamilton** convention. Most robotics libraries use it: SciPy `Rotation`, Eigen, ROS `tf2`, MoveIt and Drake. A second convention, called **JPL** or **Shuster**, satisfies $\mathbf{i}\mathbf{j}\mathbf{k} = +1$ and is found in spacecraft work and in some drivers for inertial sensors. A JPL quaternion read by a Hamilton library gives the opposite turn, with no error message. This lesson uses Hamilton throughout.
 :::
 
 ### Unit Quaternions and the Rotation Constraint
 
-For representing rotations, we restrict ourselves to unit quaternions, which lie on the surface of the 4D unit hypersphere. A unit quaternion satisfies the constraint:
+Only a quaternion of length 1 represents a turn. It is called a unit quaternion:
 
 $$
 \|\mathbf{q}\| = \sqrt{w^2 + x^2 + y^2 + z^2} = 1
 $$
 
-This constraint means that 3D rotations live on a 3-dimensional surface ($S^3$) embedded in 4D space. The unit quaternion group is a **double cover** of the rotation group SO(3): both $\mathbf{q}$ and $-\mathbf{q}$ represent the same physical rotation.
+Four numbers with one condition leave three free values, which is exactly what an orientation needs. Rounding errors slowly change the length, so a program divides the quaternion by its length from time to time. This is called normalizing.
+
+One fact causes many program errors: $\mathbf{q}$ and $-\mathbf{q}$ (all four signs changed) represent the same turn. It is called the **double cover**, and it returns in the part on SLERP.
 
 ### Quaternion from Axis-Angle Representation
 
+Take a turn by an angle $\theta$ about an axis. Write the axis as a vector of length 1, $\hat{\mathbf{n}} = (n_x, n_y, n_z)$. The scalar part of the quaternion is the cosine of half the angle. The vector part is the axis multiplied by the sine of half the angle:
+
 ```text
-  Axis-Angle to Quaternion Mapping
+  A turn: axis and angle          The quaternion: four numbers
 
-  Axis-Angle:                     Quaternion:
-
-       n_hat (unit axis)            q = [w,  x,  y,  z]
-          |  /                           |         |
-          | / theta                      |         |
-          |/  (rotation                  |         +-- sin(theta/2) * n_hat
-          +--- angle)                    |
-       origin                            +-- cos(theta/2)
-
-  Example: 90 deg about Z-axis
-
-  n_hat = (0, 0, 1), theta = 90 deg
-
-  w = cos(45) = 0.707
-  x = sin(45) * 0 = 0
-  y = sin(45) * 0 = 0         q = [0.707, 0, 0, 0.707]
-  z = sin(45) * 1 = 0.707
+      n (axis, length 1)          q = [ w,   x,  y,  z ]
+       |                                |    |
+       |  theta                         |    +-- sin(theta/2) * n
+       | /  (angle of the turn)         |
+       |/                               +-- cos(theta/2)
+       +
 ```
 
-Any 3D rotation can be described as a rotation by angle $\theta$ about a unit axis $\hat{\mathbf{n}} = (n_x, n_y, n_z)$. The corresponding unit quaternion is:
-
 $$
-\mathbf{q} = \cos\frac{\theta}{2} + \sin\frac{\theta}{2}\,(n_x\,\mathbf{i} + n_y\,\mathbf{j} + n_z\,\mathbf{k})
+\mathbf{q} = \left[\cos\frac{\theta}{2},\;\; \sin\frac{\theta}{2}\,\hat{\mathbf{n}}\right] = \cos\frac{\theta}{2} + \sin\frac{\theta}{2}\,(n_x\,\mathbf{i} + n_y\,\mathbf{j} + n_z\,\mathbf{k})
 $$
 
-Or equivalently:
+**Example:** a $90°$ turn about the Z-axis, so $\theta = 90°$ and $\hat{\mathbf{n}} = (0, 0, 1)$:
 
 $$
-\mathbf{q} = \left[\cos\frac{\theta}{2},\;\; \sin\frac{\theta}{2}\,\hat{\mathbf{n}}\right]
+w = \cos\frac{90°}{2} = \cos 45° = 0.707, \qquad (x, y, z) = \sin 45° \times (0, 0, 1) = (0,\; 0,\; 0.707)
 $$
 
-**Example:** A $90°$ rotation about the Z-axis:
+$$
+\mathbf{q} = [w, x, y, z] = [0.707,\; 0,\; 0,\; 0.707]
+$$
 
-$$
-\mathbf{q} = \cos(45°) + \sin(45°)\,\mathbf{k} = \frac{\sqrt{2}}{2} + \frac{\sqrt{2}}{2}\,\mathbf{k} = [0.707,\; 0,\; 0,\; 0.707]
-$$
+Its length is $\sqrt{0.707^2 + 0.707^2} = 1$, as it must be.
 
 ```python
 import numpy as np
@@ -298,7 +261,7 @@ print(f"  Rotation matrix:\n{r.as_matrix().round(4)}")
 
 ### Quaternion Multiplication (Rotation Composition)
 
-The composition of two rotations corresponds to quaternion multiplication. Given quaternions $\mathbf{q}_1 = [w_1, \mathbf{v}_1]$ and $\mathbf{q}_2 = [w_2, \mathbf{v}_2]$, their product is:
+To make one turn and then another, multiply their quaternions. The product is one quaternion for the combined turn. Write $\mathbf{q}_1 = [w_1, \mathbf{v}_1]$ and $\mathbf{q}_2 = [w_2, \mathbf{v}_2]$, where $\mathbf{v}$ is the vector part. The product uses the dot product ($\cdot$) and the cross product ($\times$) of the two vector parts:
 
 $$
 \mathbf{q}_1 \otimes \mathbf{q}_2 = \begin{bmatrix}
@@ -307,7 +270,7 @@ w_1 \mathbf{v}_2 + w_2 \mathbf{v}_1 + \mathbf{v}_1 \times \mathbf{v}_2
 \end{bmatrix}
 $$
 
-Expanding fully with components $\mathbf{q}_1 = [w_1, x_1, y_1, z_1]$ and $\mathbf{q}_2 = [w_2, x_2, y_2, z_2]$:
+Written out with the four numbers of each, $\mathbf{q}_1 = [w_1, x_1, y_1, z_1]$ and $\mathbf{q}_2 = [w_2, x_2, y_2, z_2]$, this is 16 multiplications:
 
 $$
 \mathbf{q}_1 \otimes \mathbf{q}_2 = \begin{bmatrix}
@@ -319,7 +282,7 @@ w_1 z_2 + x_1 y_2 - y_1 x_2 + z_1 w_2
 $$
 
 :::note[Multiplication Order]
-Quaternion multiplication is **not commutative**: $\mathbf{q}_1 \otimes \mathbf{q}_2 \neq \mathbf{q}_2 \otimes \mathbf{q}_1$ in general. To apply rotation $\mathbf{q}_1$ first, then $\mathbf{q}_2$, the combined quaternion is $\mathbf{q}_2 \otimes \mathbf{q}_1$ (right-to-left, same as rotation matrices).
+The order matters: in general $\mathbf{q}_1 \otimes \mathbf{q}_2 \neq \mathbf{q}_2 \otimes \mathbf{q}_1$. Turn a book $90°$ about a vertical axis and then $90°$ about a horizontal one, then repeat in the other order: it ends in a different pose. To make turn $\mathbf{q}_1$ first and then $\mathbf{q}_2$, both about the fixed axes of the room, write $\mathbf{q}_2 \otimes \mathbf{q}_1$. The first turn stands on the right, as with rotation matrices.
 :::
 
 ```python
@@ -349,37 +312,29 @@ print(f"Same as combined? {np.allclose(r_combined.as_quat(), r_reversed.as_quat(
 
 ### Quaternion Conjugate and Inverse
 
-The quaternion conjugate negates the vector part while keeping the scalar part unchanged. For unit quaternions, the conjugate equals the inverse, representing the reverse rotation.
-
-**Conjugate:**
+To undo a turn, turn back about the same axis by the same angle. The conjugate $\mathbf{q}^*$ does this: it keeps $w$ and changes the sign of $x$, $y$ and $z$.
 
 $$
 \mathbf{q}^* = w - x\,\mathbf{i} - y\,\mathbf{j} - z\,\mathbf{k} = [w, -\mathbf{v}]
 $$
 
-**Inverse (general):**
+The inverse $\mathbf{q}^{-1}$ is the quaternion that undoes $\mathbf{q}$. In general it is the conjugate divided by the length squared. For a unit quaternion the length is 1, so the inverse is the conjugate:
 
 $$
-\mathbf{q}^{-1} = \frac{\mathbf{q}^*}{\|\mathbf{q}\|^2}
+\mathbf{q}^{-1} = \frac{\mathbf{q}^*}{\|\mathbf{q}\|^2} = \mathbf{q}^* \quad \text{when } \|\mathbf{q}\| = 1
 $$
 
-**For unit quaternions** ($\|\mathbf{q}\| = 1$):
-
-$$
-\mathbf{q}^{-1} = \mathbf{q}^*
-$$
-
-This means $\mathbf{q} \otimes \mathbf{q}^* = \mathbf{q}^* \otimes \mathbf{q} = [1, \mathbf{0}]$ (the identity quaternion).
+A turn followed by its inverse is no turn at all: $\mathbf{q} \otimes \mathbf{q}^* = [1, \mathbf{0}]$, the identity quaternion.
 
 ### Rotating Vectors with Quaternions
 
-To rotate a 3D vector $\mathbf{p}$ by a unit quaternion $\mathbf{q}$, embed the vector as a pure quaternion $\mathbf{p}' = [0, \mathbf{p}]$ and compute:
+A quaternion can turn a vector $\mathbf{p}$, for example the direction in which a camera points. Write the vector as a quaternion with a scalar part of zero, $\mathbf{p}' = [0, \mathbf{p}]$, and multiply it from both sides:
 
 $$
 \mathbf{p}_{\text{rotated}} = \mathbf{q} \otimes \mathbf{p}' \otimes \mathbf{q}^*
 $$
 
-The result is a pure quaternion whose vector part gives the rotated vector.
+The scalar part of the result is zero again, and its vector part is the turned vector. The program below turns $(1, 0, 0)$ by $90°$ about the Z-axis and gets $(0, 1, 0)$.
 
 ```python
 import numpy as np
@@ -410,24 +365,23 @@ for v, rv in zip(vectors, rotated):
 
 ### SLERP: Spherical Linear Interpolation
 
-SLERP (Spherical Linear Interpolation) produces the shortest, constant-angular-velocity path between two orientations on the quaternion hypersphere. Unlike linear interpolation of Euler angles (which creates curved, non-uniform paths), SLERP guarantees smooth, predictable rotational motion.
+To move a tool from one orientation to another, the natural motion is one steady turn about one fixed axis. SLERP (spherical linear interpolation) calculates the orientations along that turn. Interpolation means finding the values between a start and an end. Moving each Euler angle steadily from its start to its end does not give this motion: the tool changes speed and swings wide.
 
-Given two unit quaternions $\mathbf{q}_0$ and $\mathbf{q}_1$, and an interpolation parameter $t \in [0, 1]$:
+Take the start $\mathbf{q}_0$, the end $\mathbf{q}_1$ and a fraction $t$ that runs from 0 (start) to 1 (end). SLERP mixes the two quaternions with weights that keep the result at length 1:
 
 $$
 \text{SLERP}(\mathbf{q}_0, \mathbf{q}_1, t) = \frac{\sin\big((1-t)\,\Omega\big)}{\sin\Omega}\,\mathbf{q}_0 + \frac{\sin(t\,\Omega)}{\sin\Omega}\,\mathbf{q}_1
 $$
 
-where $\Omega = \arccos(\mathbf{q}_0 \cdot \mathbf{q}_1)$ is the angle between the two quaternions.
+Here $\Omega = \arccos(\mathbf{q}_0 \cdot \mathbf{q}_1)$, in radians, and $\mathbf{q}_0 \cdot \mathbf{q}_1 = w_0 w_1 + x_0 x_1 + y_0 y_1 + z_0 z_1$ is the ordinary dot product of the two sets of four numbers. $\Omega$ is half the angle of the turn from the start to the end. At $t = 0$ the formula gives $\mathbf{q}_0$, and at $t = 1$ it gives $\mathbf{q}_1$.
 
 :::note[SLERP Implementation Details]
-- If $\mathbf{q}_0 \cdot \mathbf{q}_1 < 0$, negate one quaternion first to ensure the shortest path (since $\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation)
-- If $\mathbf{q}_0 \cdot \mathbf{q}_1 \approx 1$, fall back to linear interpolation (LERP) followed by normalization to avoid division by near-zero
-- SLERP produces constant angular velocity, making it ideal for smooth robotic motion
+- If $\mathbf{q}_0 \cdot \mathbf{q}_1 < 0$, change the sign of one quaternion first. It is still the same orientation, and SLERP then takes the short way round.
+- If $\mathbf{q}_0 \cdot \mathbf{q}_1 \approx 1$, the two orientations are almost the same and $\sin\Omega$ is close to zero. Mix the two linearly and normalize the result, to avoid dividing by a number near zero.
 :::
 
 <Card title="Double-Cover in Practice: Always Check the Dot Product" icon="warning">
-The double-cover property ($\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation) is the single most common quaternion bug in practice. Interpolating between $\mathbf{q}_0$ and $-\mathbf{q}_0$ with SLERP produces a full rotation instead of staying still, because SLERP goes the long way around the hypersphere. `scipy.spatial.transform.Slerp` handles this internally, but if you implement SLERP yourself, you must guard against it:
+The double cover ($\mathbf{q}$ and $-\mathbf{q}$ are the same orientation) is the most common cause of quaternion errors. Ask SLERP to go from $\mathbf{q}_0$ to $-\mathbf{q}_0$ and the tool should stay still, but it makes a full turn, because SLERP takes the long way round. `scipy.spatial.transform.Slerp` handles this for you. If you write SLERP yourself, you must guard against it:
 
 ```python
 def slerp_safe(q0, q1, t):
@@ -445,7 +399,7 @@ def slerp_safe(q0, q1, t):
     return s0 * q0 + s1 * q1
 ```
 
-The same pattern applies to quaternion-based trajectory tracking: at every tick, check $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and negate the target if negative. Without this, the robot can "unwind" a full rotation between two otherwise close orientations.
+The same check belongs in any controller that follows a target orientation. In every control cycle, calculate $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and change the sign of the target if the result is negative. Without the check, the robot can make almost a full turn between two orientations that are close together.
 </Card>
 
 ```python
@@ -494,20 +448,19 @@ print("SLERP produces smooth, constant-velocity orientation transitions")
 
 <Card title="Euler Angles (Roll, Pitch, Yaw)">
 
-**Parameters:** 3 angles
+**Numbers stored:** 3 angles
 
 **Pros:**
-- Intuitive for humans (easy to visualize individual rotations)
-- Minimal storage (3 numbers)
-- Direct correspondence to physical gimbal hardware
+- Easy for a person to read and to picture
+- Each angle matches one motor of a physical gimbal
 
 **Cons:**
-- Gimbal lock at specific configurations (loss of 1 DOF)
-- Non-unique representation (multiple angle sets for the same orientation)
-- Interpolation produces curved, non-uniform paths
-- 12 different conventions cause confusion between systems
+- Gimbal lock when the middle angle is $\pm 90°$ (one direction of turning is lost)
+- Several sets of angles describe the same orientation
+- Moving the three angles steadily does not turn the tool steadily
+- 12 different orders cause errors between systems
 
-**Best for:** Human interfaces, small-angle approximations, initial design intuition
+**Best for:** what a person types in or reads on a display, and small tilts away from level
 
 </Card>
 
@@ -516,21 +469,19 @@ print("SLERP produces smooth, constant-velocity orientation transitions")
 
 <Card title="Rotation Matrices (3x3 SO(3))">
 
-**Parameters:** 9 elements (6 constraints, 3 DOF)
+**Numbers stored:** 9 (only 3 are free; the other 6 follow from them)
 
 **Pros:**
-- No singularities or gimbal lock
-- Direct vector transformation via matrix-vector multiplication
-- Well-understood linear algebra operations
-- Composition via standard matrix multiplication
+- No gimbal lock
+- Turns a vector with one matrix multiplication
+- Two turns combine by ordinary matrix multiplication
+- Joins with a position into one 4 by 4 matrix for a robot arm
 
 **Cons:**
-- Redundant storage (9 numbers for 3 DOF)
-- Orthogonality drift under repeated multiplication (requires re-orthogonalization)
-- No natural interpolation method
-- Extracting rotation angle or axis requires additional computation
+- Rounding errors build up, and the matrix must be corrected so that it remains a pure turn
+- No direct way to find the orientations between a start and an end
 
-**Best for:** Direct coordinate transformations, DH parameters, when composing with translation matrices
+**Best for:** changing coordinates from one frame to another, and chains of links where each turn comes with a shift in position
 
 </Card>
 
@@ -539,43 +490,25 @@ print("SLERP produces smooth, constant-velocity orientation transitions")
 
 <Card title="Unit Quaternions (4D Hypersphere)">
 
-**Parameters:** 4 components (1 constraint, 3 DOF)
+**Numbers stored:** 4 (3 are free; the length must be 1)
 
 **Pros:**
-- No singularities or gimbal lock
-- Compact storage (4 numbers)
-- SLERP provides smooth, constant-velocity interpolation
-- Efficient composition (16 multiplications vs. 27 for matrices)
-- Easy normalization (divide by magnitude)
-- Numerically stable under repeated operations
+- No gimbal lock
+- SLERP gives a steady turn between two orientations
+- Two turns combine with 16 multiplications, against 27 for matrices
+- Rounding error is corrected by one division by the length
 
 **Cons:**
-- Less intuitive than Euler angles for human understanding
-- Double cover: $\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation
-- Not directly applicable to vector transformation without conversion
-- Requires quaternion-aware libraries
+- Hard for a person to read
+- $\mathbf{q}$ and $-\mathbf{q}$ are the same orientation, which a program must check
+- Needs a library that knows the quaternion rules and conventions
 
-**Best for:** Real-time orientation control, motion planning, animation, any system requiring smooth interpolation
+**Best for:** what the controller stores and calculates with: control loops, sensor data, and smooth motion between orientations
 
 </Card>
 
   </TabItem>
 </Tabs>
-
-<CardGrid>
-  <Card title="When to Use Quaternions" icon="approve-check">
-    - Real-time control loops (drones, robots)
-    - Smooth orientation interpolation (SLERP)
-    - Long kinematic chains with accumulated rotations
-    - Any system that must pass through all orientations
-  </Card>
-  <Card title="When to Use Rotation Matrices" icon="setting">
-    - Homogeneous transformation pipelines (DH convention)
-    - Direct coordinate frame transformations
-    - When composing rotation with translation
-    - Educational derivation of kinematic equations
-  </Card>
-</CardGrid>
 
 ### Python: Quaternion Operations with SciPy
 
@@ -695,7 +628,7 @@ def angular_velocity(rotations, dt):
         velocities[i] = r_diff.magnitude() / dt
     return velocities
 
-dt = 1.0 / n_steps
+dt = t_values[1] - t_values[0]
 euler_rots = Rotation.from_euler('ZYX', euler_interp, degrees=True)
 vel_euler = angular_velocity(euler_rots, dt)
 vel_slerp = angular_velocity(slerp_rots, dt)
@@ -724,13 +657,13 @@ axes[0, 1].grid(True, alpha=0.3)
 # Angular velocity comparison
 axes[1, 0].plot(t_values[:-1], np.degrees(vel_euler), 'r-', linewidth=2)
 axes[1, 0].set_title('Angular Velocity: Euler Interpolation')
-axes[1, 0].set_ylabel('Angular velocity (deg/step)')
+axes[1, 0].set_ylabel('Angular velocity (deg per unit t)')
 axes[1, 0].set_xlabel('Interpolation parameter t')
 axes[1, 0].grid(True, alpha=0.3)
 
 axes[1, 1].plot(t_values[:-1], np.degrees(vel_slerp), 'b-', linewidth=2)
 axes[1, 1].set_title('Angular Velocity: SLERP')
-axes[1, 1].set_ylabel('Angular velocity (deg/step)')
+axes[1, 1].set_ylabel('Angular velocity (deg per unit t)')
 axes[1, 1].set_xlabel('Interpolation parameter t')
 axes[1, 1].grid(True, alpha=0.3)
 
@@ -748,7 +681,7 @@ print("Euler interpolation has variable speed and may produce unexpected paths")
 <InArticleAd />
 
 
-We now apply quaternion theory to the drone gimbal stabilization problem. The gimbal must smoothly track a target orientation while the drone body rotates underneath it. Using quaternions, we compute the required gimbal correction at each time step and generate smooth command trajectories via SLERP.
+The drone body turns in the wind, and the camera must keep pointing the same way. The gimbal must therefore turn the camera by exactly the turn that cancels the motion of the body. An IMU (inertial measurement unit, a sensor that reports how the body is oriented) gives the body orientation as a quaternion. One quaternion multiplication gives the turn the gimbal must make, and SLERP limits how fast the gimbal moves toward it.
 
 ```mermaid
 flowchart TD
@@ -761,18 +694,20 @@ flowchart TD
 
 ### Problem Setup
 
-A camera drone is performing an aerial survey. The drone body undergoes roll and pitch disturbances from wind gusts, but the camera must maintain a fixed downward-pointing orientation. The gimbal control loop runs at 100 Hz and must compute the corrective rotation quaternion at each step.
+A camera drone is surveying land from the air. Wind gusts roll and pitch the drone body, but the camera must keep pointing straight down. The gimbal control loop runs 100 times a second (100 Hz), and in each cycle it must calculate the turn that corrects the camera.
 
 **Given:**
-- Camera desired orientation: pointing straight down, $\mathbf{q}_{\text{desired}} = [0.707, 0.707, 0, 0]$ (90° about X-axis from level)
-- Drone body orientation (measured by IMU): varying quaternion $\mathbf{q}_{\text{body}}(t)$
-- Gimbal must output: $\mathbf{q}_{\text{gimbal}}$ such that $\mathbf{q}_{\text{body}} \otimes \mathbf{q}_{\text{gimbal}} = \mathbf{q}_{\text{desired}}$
+- Camera desired orientation: pointing straight down, $\mathbf{q}_{\text{desired}} = [0.707, -0.707, 0, 0]$ in $[w, x, y, z]$ order ($-90°$ about the X-axis from level)
+- Drone body orientation, measured by the IMU: a quaternion $\mathbf{q}_{\text{body}}(t)$ that changes with time
+- The gimbal turn $\mathbf{q}_{\text{gimbal}}$ must satisfy $\mathbf{q}_{\text{body}} \otimes \mathbf{q}_{\text{gimbal}} = \mathbf{q}_{\text{desired}}$: the body turn followed by the gimbal turn gives the desired orientation
 
-**Solution:**
+**Solution:** multiply both sides from the left by the inverse of the body quaternion, which is its conjugate.
 
 $$
 \mathbf{q}_{\text{gimbal}} = \mathbf{q}_{\text{body}}^{-1} \otimes \mathbf{q}_{\text{desired}} = \mathbf{q}_{\text{body}}^* \otimes \mathbf{q}_{\text{desired}}
 $$
+
+**Check one case by hand.** A gust rolls the body $+15°$ about the X-axis. The gimbal must undo the $15°$ and then turn $90°$ more: $-15° - 90° = -105°$ about X. As a quaternion this is $[\cos(-52.5°),\; \sin(-52.5°),\; 0,\; 0] = [0.609, -0.793, 0, 0]$. In SciPy, `q_body.inv() * q_desired` gives this turn for the same case. It prints all four signs changed, which is the same orientation.
 
 ```python
 import numpy as np
@@ -791,7 +726,7 @@ t_total = 5.0      # 5-second flight segment
 t = np.arange(0, t_total, dt)
 n_steps = len(t)
 
-# Desired camera orientation: pointing straight down (90° pitch about X)
+# Desired camera orientation: pointing straight down (-90° about X)
 q_desired = Rotation.from_euler('x', -90, degrees=True)
 
 # Simulate drone body disturbances (wind gusts causing roll/pitch oscillation)
@@ -821,7 +756,7 @@ for i in range(n_steps):
     camera_error[i] = np.degrees(q_error.magnitude())
 
 # --- With SLERP smoothing (rate-limited gimbal) ---
-max_rate = 200  # degrees per second maximum gimbal rate
+max_rate = 60  # degrees per second maximum gimbal rate
 camera_error_smooth = np.zeros(n_steps)
 q_gimbal_current = q_desired  # Start at desired
 
@@ -893,46 +828,42 @@ print(f"Rate-limited (SLERP): mean error = {camera_error_smooth.mean():.2f}°")
 <details>
 <summary>Extending to Surgical Robot Tool Orientation</summary>
 
-The same quaternion framework applies to surgical tool positioning. A surgical robot must smoothly reorient its tool between two arbitrary poses (e.g., from a viewing angle to a cutting angle). The key differences from the gimbal case:
-
-- **Waypoint sequences**: SLERP between multiple orientations using chained interpolation
-- **Velocity constraints**: the tool must not exceed safe angular speeds near tissue
-- **Obstacle avoidance**: orientation must be coordinated with position to avoid collisions with anatomy
-
-The mathematics is identical. The gimbal correction formula $\mathbf{q}_{\text{correction}} = \mathbf{q}_{\text{current}}^{-1} \otimes \mathbf{q}_{\text{target}}$ applies in both cases. The surgical system adds trajectory constraints on top of the basic quaternion operations.
+A surgical robot turns its tool from one pose to another, for example from a viewing angle to a cutting angle. The formula is the one used for the gimbal: $\mathbf{q}_{\text{correction}} = \mathbf{q}_{\text{current}}^{-1} \otimes \mathbf{q}_{\text{target}}$. The surgical system adds a sequence of orientations (SLERP from the first to the second, then from the second to the third), a limit on how fast the tool turns near tissue, and a position that must change together with the orientation.
 
 </details>
+
+:::tip[Instrument it]
+Quaternions and SLERP describe and blend orientation, and an IMU measures it. A 9-axis sensor (BNO055 or ICM-20948) reports orientation as a quaternion directly, so you can compare its output with the interpolation you calculated, and see that the quaternion stays well behaved where the Euler angles jump. Connect it to an [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) and [stream the live quaternion to siliconwit.io](https://siliconwit.io) to see drift build up and the magnetometer pull it back.
+:::
 
 ## Design Guidelines: Choosing Orientation Representations
 
 <InArticleAd />
 
 
-Selecting the right orientation representation depends on your system requirements. Here are practical guidelines derived from industrial and research robotics practice.
+Each of the three forms has a place. Choose by what the number is used for.
 
 <Steps>
-1. **Use quaternions** when your system must interpolate between orientations smoothly, operate near or through all possible orientations, or run in real-time control loops at high frequency. Drones, IMU fusion, spacecraft attitude control, and animation systems all benefit from quaternions.
+1. **Use quaternions** for what the controller stores and calculates: IMU data, fast control loops, and any motion that must pass smoothly through every orientation.
 
-2. **Use rotation matrices** when working within a homogeneous transformation pipeline (e.g., DH parameters in serial robot arms), when composing rotation with translation, or when interfacing with legacy systems that expect 3x3 or 4x4 matrices.
+2. **Use rotation matrices** when a turn comes together with a shift in position, as in the link-by-link transformations of a robot arm (the DH parameters), or when other software expects 3x3 or 4x4 matrices.
 
-3. **Use Euler angles** only for human-facing interfaces (joystick input, display readouts), small-angle approximations in linearized control, or quick prototyping where gimbal lock is not a concern. Always convert to quaternions or matrices for internal computation.
+3. **Use Euler angles** only where a person meets the number (joystick input, a display), or for small tilts where gimbal lock is far away. Convert them to quaternions or matrices before any calculation.
 
-4. **Store orientations as quaternions internally**, converting to other representations only at the interface layer. This prevents numerical drift and ensures singularity-free operation throughout the control pipeline.
+4. **Store orientations as quaternions inside the program**, and convert to the other forms only where data enters or leaves.
 
-5. **Normalize quaternions** regularly to prevent drift from the unit hypersphere. $\mathbf{q} \leftarrow \mathbf{q} / \|\mathbf{q}\|$ is computationally cheap. Concrete cadence: renormalize every control cycle in a high-frequency loop (100 Hz or faster), or whenever $|\|\mathbf{q}\|^2 - 1| > 0.01$. After a few hundred repeated multiplications without normalization, a unit quaternion can drift by several percent, and the resulting rotation becomes non-orthogonal.
+5. **Normalize quaternions** regularly: $\mathbf{q} \leftarrow \mathbf{q} / \|\mathbf{q}\|$. Do it every control cycle in a fast loop (100 Hz or faster), or whenever $|\|\mathbf{q}\|^2 - 1| > 0.01$. The rounding error of one multiplication is tiny (about $10^{-16}$ in double precision). The larger effect comes from updating the quaternion with the turn rate $\boldsymbol{\omega}$ from a gyroscope over a time step $\Delta t$, $\mathbf{q} \leftarrow \mathbf{q} + \tfrac{1}{2}\,\mathbf{q} \otimes \boldsymbol{\omega}\,\Delta t$, which makes the length grow at every step. After a few hundred steps without normalizing, the length can be several percent too large.
 
-6. **Check the sign convention** when combining quaternion libraries. Since $\mathbf{q}$ and $-\mathbf{q}$ represent the same rotation, always enforce $w \geq 0$ (or check dot product sign before SLERP) to avoid taking the long path around the hypersphere.
+6. **Check the sign** when you compare or blend quaternions. Because $\mathbf{q}$ and $-\mathbf{q}$ are the same orientation, keep $w \geq 0$, or check the sign of the dot product before SLERP, so that the motion takes the short way.
 </Steps>
 
 :::note[Quick Reference: Representation Selection]
 | Criterion | Quaternions | Rotation Matrices | Euler Angles |
 |---|---|---|---|
-| Singularity-free | Yes | Yes | No (gimbal lock) |
-| Smooth interpolation | SLERP | Complex | Non-uniform paths |
+| Free of gimbal lock | Yes | Yes | No |
+| Steady turn between two orientations | SLERP | Not direct | No |
 | Storage | 4 numbers | 9 numbers | 3 numbers |
-| Composition cost | 16 multiplies | 27 multiplies | Requires conversion |
-| Human intuition | Low | Medium | High |
-| Numerical stability | High | Drifts (re-orthogonalize) | N/A |
+| Easy for a person to read | No | Partly | Yes |
 :::
 
 ## Summary
@@ -940,14 +871,12 @@ Selecting the right orientation representation depends on your system requiremen
 <InArticleAd />
 
 
-This lesson covered the complete quaternion framework for robotic orientation control. Starting from the limitations of Euler angles (gimbal lock at specific configurations), we developed quaternion algebra as a singularity-free alternative. Unit quaternions represent rotations as points on a 4D hypersphere, enabling smooth SLERP interpolation that maintains constant angular velocity. Through the drone gimbal stabilization example, we demonstrated how quaternion operations (composition, inversion, vector rotation) translate directly to practical control code. The comparison between Euler angles, rotation matrices, and quaternions provides a decision framework for selecting the right representation based on your system's requirements.
-
 **Key Takeaways:**
-- Euler angles suffer from gimbal lock when the middle rotation reaches $\pm 90°$, losing one degree of freedom
-- Unit quaternions $\mathbf{q} = [w, x, y, z]$ with $\|\mathbf{q}\| = 1$ represent rotations without singularities
-- Quaternion multiplication composes rotations; the conjugate $\mathbf{q}^*$ gives the inverse rotation
-- SLERP interpolation produces the shortest, smoothest path between two orientations
-- For real-time robotic control, store orientations as quaternions internally and convert only at interface boundaries
+- Euler angles lose one direction of turning when the middle turn reaches $\pm 90°$, because two of the three axes then lie on one line. This is gimbal lock.
+- A unit quaternion $\mathbf{q} = [w, x, y, z]$ with $\|\mathbf{q}\| = 1$ stores one turn about one axis, and has no such pose
+- Quaternion multiplication combines two turns, and the conjugate $\mathbf{q}^*$ undoes a turn
+- SLERP gives a steady turn between two orientations, by the short way if the dot product is checked first
+- Show Euler angles to people, use rotation matrices where a turn comes with a shift in position, and store quaternions inside the controller
 
 
 

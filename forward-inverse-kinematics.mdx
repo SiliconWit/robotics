@@ -22,11 +22,9 @@ import { Card, CardGrid, Badge, Steps, LinkButton, FileTree } from '@astrojs/sta
   contributors={frontmatter.contributors}
 />
 
-
-
 import PodcastEmbed from '../../../../components/PodcastEmbed.astro';
 
-Forward and inverse kinematics are the two central problems in robotic manipulation. Forward kinematics (FK) maps joint angles to end-effector position, answering "where is the tool?" Inverse kinematics (IK) reverses the question: "what joint angles place the tool at this target?" This lesson develops both frameworks through a robotic welding application, using geometric closed-form solutions and numerical iteration for when closed-form methods break down. #ForwardKinematics #InverseKinematics #RoboticWelding
+A robot can only turn its joints, but the work is at a point in space: a weld seam, a screw hole, a part on a tray. With the wrong joint angles the tool arrives a few millimetres away and the weld is scrap. Two calculations connect the angles to the point. Forward kinematics (FK) answers "the joints are at these angles, so where is the tool?" Inverse kinematics (IK) answers "the tool must be at this point, so which angles do I command?" This lesson solves both for a two-link welding arm. #ForwardKinematics #InverseKinematics #RoboticWelding
 
 <PodcastEmbed src="https://open.spotify.com/episode/3LAHpB4zmdXlvx0RSDnWcg?si=dN6VbnmVScqKQxUJ673VgA" />
 
@@ -45,55 +43,52 @@ By the end of this lesson, you will be able to:
 
 <InArticleAd />
 
-
-A 2-DOF planar robot arm is tasked with welding a curved seam on a cylindrical pressure vessel. The seam follows an arc defined by discrete waypoints along the vessel surface. The robot must position its welding torch at each waypoint with millimeter-level accuracy. The arm has link lengths $L_1 = 400$ mm and $L_2 = 300$ mm, and the weld seam lies partially near the boundary of the robot's reachable workspace. The production line requires the robot to complete each weld pass in under 8 seconds, so joint angle computation must be fast and reliable.
+A robot arm welds a curved seam on a pressure vessel. The arm moves in one flat plane and has two revolute (turning) joints, so it is called a planar 2R arm. Its link lengths are $L_1 = 400$ mm and $L_2 = 300$ mm. The seam is an arc, given as a row of points called waypoints, and the torch must be within about a millimetre of each one. The far part of the seam comes within about 120 mm of the edge of the region the arm can reach.
 
 :::note[Engineering Questions]
-1. Given the two link lengths, what is the maximum reach of this robot? What region of the plane can the end-effector access?
-2. For a target point on the weld seam, how many valid joint angle solutions exist? Which solution should the controller select, and why?
-3. What happens when a target point approaches the workspace boundary? How does this affect joint velocities and control stability?
-4. If the seam path includes a point outside the workspace, how should the system detect and handle this condition?
+1. How far can the robot reach, and which region of the plane can the torch cover?
+2. For one point on the seam, how many pairs of joint angles put the torch there, and which pair should the controller use?
+3. What changes when a target comes close to the edge of the reachable region?
+4. How does the system find a point it cannot reach before it moves?
 :::
 
 ### Why This Problem Matters in Industry
 
-Robotic welding is one of the largest applications of industrial manipulators. Automotive body shops, shipbuilding, pipeline construction, and pressure vessel fabrication all rely on robots to follow complex seam geometries at consistent speed and heat input. The kinematic accuracy of the robot directly affects weld quality: too much positional error causes incomplete fusion, porosity, or burn-through. Forward kinematics provides the feedback loop (verifying where the torch actually is), while inverse kinematics drives the control loop (commanding where the torch needs to go). Together, they form the computational backbone of every robotic welding cell.
+A torch that is off the seam gives a weld that is not fully fused or burns through the plate. The controller uses inverse kinematics to turn the next point of the seam into joint angles, and forward kinematics to check from the measured angles that the torch arrived.
 
 ## Forward Kinematics: From Joint Angles to End-Effector Position
 
 <InArticleAd />
 
-
-Forward kinematics answers the question: given all joint angles $\theta_1, \theta_2, \dots, \theta_n$, where is the end-effector in Cartesian space? For serial manipulators, the answer is built by chaining coordinate transformations from the base frame through each link to the tool frame. We begin with the simplest case, a 2R planar robot, then extend the approach to general serial chains using DH parameters.
+The joint angles are known. Where is the end-effector (the tool at the end of the arm)? We answer first for the planar 2R arm with plain trigonometry, then with a method that works for any number of joints.
 
 ### FK for a 2R Planar Robot
 
 ```text
-  2R Planar Robot Arm
+  2R planar arm: the two joint angles
 
-                          end-effector (x_e, y_e)
-                         /
-                        / Link 2 (L2)
+                        hand (x_e, y_e)
                        /
-              elbow --+  angle theta2
-             (x1,y1) /   (relative to Link 1)
+                      /  link 2, length L2
                      /
-                    / Link 1 (L1)
-                   /
-                  / angle theta1
-  base (0,0) ---+  (from +x axis)
-                 -----------> x
+          elbow     o . . . . .  link 1 continued
+        (x1, y1)   /   theta2 = turn of link 2
+                  /             away from this line
+                 /  link 1, length L1
+                /
+               /  theta1
+  base (0,0)  o-------------------------> x
 ```
 
-Consider a planar robot with two revolute joints. Link 1 has length $L_1$ and rotates by angle $\theta_1$ from the horizontal. Link 2 has length $L_2$ and rotates by angle $\theta_2$ relative to link 1.
+Link 1 has length $L_1$ and points at the angle $\theta_1$, measured counterclockwise from the $x$ axis. Link 2 has length $L_2$. Its angle $\theta_2$ is measured from the direction of link 1, counterclockwise positive, so link 2 points at $\theta_1 + \theta_2$ in the plane.
 
-The position of the elbow joint (end of link 1) is:
+Walk from the base to the hand. A link of length $L$ that points at an angle $\phi$ moves you $L \cos\phi$ along $x$ and $L \sin\phi$ along $y$. After link 1 you are at the elbow:
 
 $$
 x_1 = L_1 \cos(\theta_1), \quad y_1 = L_1 \sin(\theta_1)
 $$
 
-The position of the end-effector (end of link 2) is:
+Add link 2 to reach the end-effector:
 
 $$
 x_e = L_1 \cos(\theta_1) + L_2 \cos(\theta_1 + \theta_2)
@@ -103,13 +98,27 @@ $$
 y_e = L_1 \sin(\theta_1) + L_2 \sin(\theta_1 + \theta_2)
 $$
 
-These two equations are the complete FK solution for a 2R planar arm. Given any pair $(\theta_1, \theta_2)$, we can compute $(x_e, y_e)$ directly.
+Every pair $(\theta_1, \theta_2)$ gives exactly one position.
+
+**Worked example.** Take $\theta_1 = 45°$ and $\theta_2 = -30°$. Link 2 points at $45° - 30° = 15°$.
+
+$$
+x_e = 400 \cos 45° + 300 \cos 15° = 282.8 + 289.8 = 572.6 \text{ mm}
+$$
+
+$$
+y_e = 400 \sin 45° + 300 \sin 15° = 282.8 + 77.7 = 360.5 \text{ mm}
+$$
+
+The elbow is at (282.8, 282.8) mm and the torch is at (572.6, 360.5) mm ✅
 
 :::note[Angle Convention]
-The angle $\theta_2$ is measured relative to link 1, not relative to the base frame. The absolute orientation of link 2 in the base frame is $\theta_1 + \theta_2$. This relative-angle convention is standard in robotics and matches the DH parameter formulation.
+A common mistake is to measure $\theta_2$ from the $x$ axis. It is measured from link 1: the angle the elbow motor turns.
 :::
 
 ### FK Implementation in Python
+
+The program repeats the worked example and prints the same two positions.
 
 ```python
 import numpy as np
@@ -208,36 +217,30 @@ def plot_robot_2R(L1, L2, theta1, theta2, target=None, title="2R Robot Arm"):
 
 ### Denavit-Hartenberg (DH) Parameter Convention
 
-For robots with more than two or three joints, writing out FK equations by hand becomes error-prone. The Denavit-Hartenberg convention provides a systematic way to assign coordinate frames to each link and express the transformation between consecutive frames using exactly four parameters. If you need a refresher on homogeneous transformation matrices and how they compose, see [Elementary Matrix Methods and Link Modeling](/education/spatial-mechanics/matrix-methods-link-modeling/).
+With six joints in 3D, the walk from base to hand is long and mistakes are easy. The Denavit-Hartenberg (DH) method replaces it with a table. You fix a frame (an origin with $x$, $y$ and $z$ axes) to each link, with $z$ along a joint axis. Four numbers then lead from one frame to the next.
 
 ```text
-  DH Frame Assignment (two consecutive frames)
+  Two neighbouring DH frames
 
-  z_{i-1}                          z_i
-    |                                |
-    |  d_i (offset along z_{i-1})   |
-    |  |                             |
-    |  v                             |
-    +---------> x_{i-1}             +---------> x_i
-   frame i-1                       frame i
-              |<--- a_i (link length along x_i) --->|
-
-  alpha_i = angle from z_{i-1} to z_i, measured about x_i
-  theta_i = angle from x_{i-1} to x_i, measured about z_{i-1}
+  z_{i-1}                            z_i
+    |                                 |
+    |  d_i: slide along z_{i-1}       |
+    |                                 |
+    +--------> x_{i-1}                +--------> x_i
+  frame i-1                         frame i
+    |<------ a_i: slide along x_i --->|
 ```
-
-Each link $i$ in a serial chain is described by four DH parameters:
 
 | Parameter | Symbol | Description |
 |-----------|--------|-------------|
-| Link length | $a_i$ | Distance along $x_i$ from $z_{i-1}$ to $z_i$ |
-| Link twist | $\alpha_i$ | Angle about $x_i$ from $z_{i-1}$ to $z_i$ |
-| Link offset | $d_i$ | Distance along $z_{i-1}$ from $x_{i-1}$ to $x_i$ |
-| Joint angle | $\theta_i$ | Angle about $z_{i-1}$ from $x_{i-1}$ to $x_i$ |
+| Joint angle | $\theta_i$ | Turn about $z_{i-1}$ that brings $x_{i-1}$ to $x_i$ (radians) |
+| Link offset | $d_i$ | Slide along $z_{i-1}$ (mm) |
+| Link length | $a_i$ | Slide along $x_i$ (mm) |
+| Link twist | $\alpha_i$ | Turn about $x_i$ that brings $z_{i-1}$ to $z_i$ (radians) |
 
-For a revolute joint, $\theta_i$ is the variable. For a prismatic joint, $d_i$ is the variable. The remaining parameters are constants determined by the robot geometry.
+A revolute joint changes $\theta_i$ as it moves, and a prismatic (sliding) joint changes $d_i$. The other numbers are fixed by the way the robot is built.
 
-The transformation matrix from frame $i-1$ to frame $i$ is:
+The four moves, done in the order of the table, are written as one $4 \times 4$ matrix called a homogeneous transformation: its upper left $3 \times 3$ block holds the turn, and its last column holds the shift (see [Elementary Matrix Methods and Link Modeling](/education/spatial-mechanics/matrix-methods-link-modeling/)). The matrix from frame $i-1$ to frame $i$ is:
 
 $$
 T_i = \begin{bmatrix}
@@ -248,14 +251,18 @@ T_i = \begin{bmatrix}
 \end{bmatrix}
 $$
 
-The overall FK from base to end-effector is the product of all individual transformations:
+Forward kinematics is then one multiplication, in order from the base to the end-effector (ee), for an arm with $n$ joints:
 
 $$
 T_{\text{base}}^{\text{ee}} = T_1 \cdot T_2 \cdot T_3 \cdots T_n
 $$
 
+The last column of the result holds the position of the end-effector.
+
+In our planar arm all joint axes are parallel, so $\alpha_i = 0$ and $d_i = 0$. The program below builds the table for the welding arm and prints (572.6, 360.5) mm, the position of the worked example ✅
+
 :::note[This Lesson Uses Classical DH]
-The matrix above follows the **classical** (original Denavit-Hartenberg 1955) convention, where frame $i$ is attached to the far end of link $i$ and the transform order is $\text{Rot}_z(\theta_i) \cdot \text{Trans}_z(d_i) \cdot \text{Trans}_x(a_i) \cdot \text{Rot}_x(\alpha_i)$. The **modified** (Craig 1986) convention attaches frame $i$ to joint $i$ instead, and its transform order is $\text{Rot}_x(\alpha_{i-1}) \cdot \text{Trans}_x(a_{i-1}) \cdot \text{Rot}_z(\theta_i) \cdot \text{Trans}_z(d_i)$. Parameter indices shift between the two conventions, so a DH table copied from a KUKA manual will not work unchanged with the matrix above. Libraries like [Robotics Toolbox for Python](https://petercorke.github.io/robotics-toolbox-python/) let you specify the convention explicitly with `RevoluteDH(...)` vs `RevoluteMDH(...)`.
+The matrix above is the **classical** version (1955). The **modified** version (Craig, 1986) places the frames differently and does the four moves in another order. A DH table from a robot manual works only with the version it was written for. [Robotics Toolbox for Python](https://petercorke.github.io/robotics-toolbox-python/) makes you choose: `RevoluteDH(...)` or `RevoluteMDH(...)`.
 :::
 
 ```python
@@ -313,86 +320,92 @@ print(f"End-effector position from DH: ({T[0,3]:.1f}, {T[1,3]:.1f}) mm")
 <details>
 <summary>DH parameters for common industrial robots</summary>
 
-Most 6-DOF industrial robots (such as the ABB IRB series, KUKA KR series, or Fanuc M-series) use a standard anthropomorphic configuration with three intersecting axes at the wrist. The first three joints position the wrist center, and the last three orient the tool. This "spherical wrist" structure enables a decoupled IK solution: position IK for joints 1 through 3, then orientation IK for joints 4 through 6. The DH parameters for each specific robot model are published in the manufacturer's technical documentation.
+In most six-joint industrial robots, the first three joints place the wrist and the last three turn the tool. The maker publishes the DH table of each model.
 </details>
 
 ## Inverse Kinematics: From Target Position to Joint Angles
 
 <InArticleAd />
 
+Inverse kinematics is the harder question. The target position $(x_t, y_t)$ of the end-effector is known, and we need the joint angles $(\theta_1, \theta_2)$ that put it there. Forward kinematics always has exactly one answer. Inverse kinematics can have none, one or several.
 
-Inverse kinematics is the harder of the two problems. Given a desired end-effector position $(x_t, y_t)$, we need to find joint angles $(\theta_1, \theta_2)$ that place the end-effector there. Unlike FK, IK can have zero solutions (target unreachable), exactly one solution (target on workspace boundary), or multiple solutions (interior of workspace). The two main approaches are geometric (closed-form) and numerical (iterative).
+### Two answers for one target
+
+Touch a point on the table with one fingertip. You can do it with your elbow high or low, and the fingertip does not move. A two-link arm has the same choice: two solutions for a target inside the reachable region, one for a target exactly on its edge, and none outside it.
+
+The two solutions are mirror images in the line from base to target, and are named by where the elbow sits. For a target to the right of the base, as in all examples here:
+
+- **Elbow-up:** the elbow is above the line from base to target. Link 2 turns clockwise from link 1, so $\theta_2 < 0$.
+- **Elbow-down:** the elbow is below that line. Link 2 turns counterclockwise from link 1, so $\theta_2 > 0$.
+
+```text
+  One target, two solutions
+
+  Elbow-up (theta2 < 0)         Elbow-down (theta2 > 0)
+
+         elbow
+          o                                   * target
+         / \                                 /
+        /   \                               /
+       /     * target                      /
+      /                                   /
+base o                          base o---o elbow
+```
+
+A welding path must stay with one of the two. A change from one to the other in the middle of a seam swings the whole arm across.
+
+### Two ways to solve it
+
+The geometric method is an exact formula for simple arms. The numerical method corrects a guess step by step and works for any arm.
 
 <Tabs>
 <TabItem label="Geometric IK (Closed-Form)">
 
 ### Geometric Inverse Kinematics for a 2R Planar Robot
 
-For the 2R arm, we can derive a closed-form IK solution using the law of cosines and basic trigonometry.
+The base, the elbow and the target make a triangle. Two sides are the links, $L_1$ and $L_2$, and the third is the distance $r$ from the base to the target. All three sides are known, so the angles can be found.
 
 **Step 1: Solve for $\theta_2$ using the law of cosines.**
 
-The distance from the base to the target is:
+By Pythagoras, the distance from the base to the target is given by:
 
 $$
 r^2 = x_t^2 + y_t^2
 $$
 
-By the law of cosines applied to the triangle formed by $L_1$, $L_2$, and $r$:
+The law of cosines relates the three sides of a triangle to one of its angles. The angle inside the triangle at the elbow is $180° - \theta_2$, and $\cos(180° - \theta_2) = -\cos\theta_2$, so the usual minus sign of the law becomes a plus:
 
 $$
 r^2 = L_1^2 + L_2^2 + 2 L_1 L_2 \cos(\theta_2)
 $$
 
-Solving for $\cos(\theta_2)$:
+Solve for $\cos(\theta_2)$, and call it $c_2$:
 
 $$
-\cos(\theta_2) = \frac{x_t^2 + y_t^2 - L_1^2 - L_2^2}{2 L_1 L_2}
+c_2 = \cos(\theta_2) = \frac{x_t^2 + y_t^2 - L_1^2 - L_2^2}{2 L_1 L_2}
 $$
 
-Let $c_2 = \cos(\theta_2)$. If $|c_2| > 1$, the target is unreachable. Otherwise:
+A cosine lies between $-1$ and $1$. If $c_2$ is outside that range, no triangle exists and the target cannot be reached. Otherwise two angles have this cosine, one positive and one negative:
 
 $$
 \theta_2 = \pm \arccos(c_2)
 $$
 
-The two signs correspond to two valid configurations: **elbow-up** ($\theta_2 > 0$) and **elbow-down** ($\theta_2 < 0$).
+The positive value is the elbow-down solution and the negative value is the elbow-up solution.
 
-```text
-  Two IK Solutions for the Same Target
+For the target (500, 200) mm with $L_1 = 400$ mm and $L_2 = 300$ mm:
 
-  Elbow-Up (theta2 > 0)         Elbow-Down (theta2 < 0)
-
-           elbow                            * target
-          / \                              /
-    L1   /   \  L2                   L2   /
-        /     \                          /
-       /       * target            elbow +
-  base +                                  \   L1
-                                           \
-                                        base +
-
-  Same target point, two valid arm configurations.
-  Continuous paths should maintain one configuration.
-```
+$$
+c_2 = \frac{500^2 + 200^2 - 400^2 - 300^2}{2 \times 400 \times 300} = \frac{40{,}000}{240{,}000} = 0.1667, \quad \theta_2 = \pm 80.41°
+$$
 
 :::note[Using atan2 for robustness]
-A more numerically robust approach computes $\sin(\theta_2)$ from $c_2$ and uses `atan2`:
-
-$$
-\sin(\theta_2) = \pm\sqrt{1 - c_2^2}
-$$
-
-$$
-\theta_2 = \text{atan2}(\sin(\theta_2), \cos(\theta_2))
-$$
-
-This avoids the sign ambiguity inherent in `arccos`.
+The function `atan2(y, x)` gives the angle of the point $(x, y)$ seen from the origin, over the full circle. Programs use it in place of `arccos`, which loses accuracy when the arm is almost straight. They find $\sin(\theta_2) = \pm\sqrt{1 - c_2^2}$, choose its sign, and take $\theta_2 = \text{atan2}(\sin\theta_2, \cos\theta_2)$.
 :::
 
 **Step 2: Solve for $\theta_1$.**
 
-Define two auxiliary quantities:
+The angle $\theta_1$ is the direction from the base to the target, minus the angle between link 1 and that direction. Seen from link 1, the hand is $k_1$ along the link and $k_2$ to its side:
 
 $$
 k_1 = L_1 + L_2 \cos(\theta_2), \quad k_2 = L_2 \sin(\theta_2)
@@ -404,7 +417,16 @@ $$
 \theta_1 = \text{atan2}(y_t, x_t) - \text{atan2}(k_2, k_1)
 $$
 
-This expression gives $\theta_1$ for each value of $\theta_2$ (elbow-up and elbow-down).
+For the target (500, 200) mm, $k_1 = 400 + 300 \times 0.1667 = 450$ mm and $k_2 = \pm 300 \times 0.9860 = \pm 295.8$ mm:
+
+$$
+\theta_1 = \text{atan2}(200, 500) - \text{atan2}(\pm 295.8, 450) = 21.80° \mp 33.32°
+$$
+
+- Elbow-down: $\theta_2 = +80.41°$, $\theta_1 = 21.80° - 33.32° = -11.52°$. The elbow is at (391.9, -79.9) mm, below the line to the target ✅
+- Elbow-up: $\theta_2 = -80.41°$, $\theta_1 = 21.80° + 33.32° = 55.12°$. The elbow is at (228.7, 328.1) mm, above the line ✅
+
+The program solves the same target and checks each solution with forward kinematics.
 
 ```python
 def inverse_kinematics_2R(L1, L2, x_t, y_t):
@@ -437,7 +459,8 @@ def inverse_kinematics_2R(L1, L2, x_t, y_t):
     sin_theta2 = np.sqrt(1 - cos_theta2**2)
 
     solutions = []
-    for sign in [+1, -1]:  # elbow-up, elbow-down
+    # sign +1 gives theta2 > 0, sign -1 gives theta2 < 0.
+    for sign in [+1, -1]:  # elbow-down (theta2 > 0), elbow-up (theta2 < 0)
         s2 = sign * sin_theta2
         theta2 = np.arctan2(s2, cos_theta2)
 
@@ -456,7 +479,7 @@ target = (500, 200)
 solutions = inverse_kinematics_2R(L1, L2, *target)
 
 for i, (t1, t2) in enumerate(solutions):
-    config = "Elbow-up" if t2 > 0 else "Elbow-down"
+    config = "Elbow-down" if t2 > 0 else "Elbow-up"
     print(f"Solution {i+1} ({config}):")
     print(f"  theta1 = {np.degrees(t1):.2f} deg")
     print(f"  theta2 = {np.degrees(t2):.2f} deg")
@@ -482,7 +505,7 @@ def plot_ik_solutions(L1, L2, x_t, y_t):
 
     for idx, (t1, t2) in enumerate(solutions):
         ax = axes[idx]
-        config = "Elbow-up" if t2 > 0 else "Elbow-down"
+        config = "Elbow-down" if t2 > 0 else "Elbow-up"
 
         (xe, ye), (x1, y1) = forward_kinematics_2R(L1, L2, t1, t2)
 
@@ -521,51 +544,29 @@ def plot_ik_solutions(L1, L2, x_t, y_t):
 
 ### Numerical Inverse Kinematics Using Newton-Raphson Iteration
 
-Geometric IK works beautifully for simple planar robots, but it does not scale to 6-DOF spatial manipulators or robots with complex joint configurations. Numerical IK uses iterative optimization to converge on a solution. The most common approach is the Jacobian-based Newton-Raphson method, which linearizes the FK mapping at each step and solves a linear system to update the joint angles.
+Many arms have no exact formula. The numerical method needs only forward kinematics. It works the way you park a car: see how far you are from the mark, correct, and look again. This scheme is called Newton-Raphson iteration.
 
-**The Algorithm:**
-
-```mermaid
-flowchart TD
-    A[Start with initial guess q0] --> B[Compute FK: p_current = FK q_k]
-    B --> C[Compute error: dp = p_target - p_current]
-    C --> D{error < tolerance?}
-    D -- Yes --> E[Solution found: return q_k]
-    D -- No --> F[Compute Jacobian J at q_k]
-    F --> G[Solve: dq = J_inv * dp]
-    G --> H[Update: q_k+1 = q_k + dq]
-    H --> B
-    style E stroke:#84cc16
-```
+In the steps below, $\mathbf{q}$ is the list of joint angles, $\mathbf{p}$ is the position of the end-effector, and the index $k$ counts the corrections.
 
 <Steps>
-1. Start with an initial guess $\mathbf{q}_0$ for the joint angles.
+1. Start with a first guess $\mathbf{q}_0$ for the joint angles.
 
-2. Compute the current end-effector position using FK: $\mathbf{p}_{\text{current}} = \text{FK}(\mathbf{q}_k)$.
+2. Use forward kinematics to find where the end-effector is now: $\mathbf{p}_{\text{current}} = \text{FK}(\mathbf{q}_k)$.
 
-3. Compute the position error: $\Delta\mathbf{p} = \mathbf{p}_{\text{target}} - \mathbf{p}_{\text{current}}$.
+3. Find the miss, from the current position to the target: $\Delta\mathbf{p} = \mathbf{p}_{\text{target}} - \mathbf{p}_{\text{current}}$.
 
-4. If $\|\Delta\mathbf{p}\| < \epsilon$ (tolerance), stop. The solution is $\mathbf{q}_k$.
+4. If the length of the miss $\|\Delta\mathbf{p}\|$ is below a small tolerance $\epsilon$, stop. The answer is $\mathbf{q}_k$.
 
-5. Compute the Jacobian matrix $J(\mathbf{q}_k)$ at the current configuration.
+5. Compute the Jacobian matrix $J(\mathbf{q}_k)$ for the current angles (explained below).
 
-6. Solve for the joint angle update: $\Delta\mathbf{q} = J^{-1} \Delta\mathbf{p}$ (or use the pseudoinverse for non-square systems).
+6. Find the change of joint angles that removes the miss: $\Delta\mathbf{q} = J^{-1} \Delta\mathbf{p}$.
 
-7. Update: $\mathbf{q}_{k+1} = \mathbf{q}_k + \Delta\mathbf{q}$.
+7. Apply it: $\mathbf{q}_{k+1} = \mathbf{q}_k + \Delta\mathbf{q}$.
 
 8. Repeat from step 2.
 </Steps>
 
-**The Jacobian matrix** for a 2R planar robot relates joint velocities to end-effector velocity:
-
-$$
-J = \begin{bmatrix}
-\frac{\partial x_e}{\partial \theta_1} & \frac{\partial x_e}{\partial \theta_2} \\[6pt]
-\frac{\partial y_e}{\partial \theta_1} & \frac{\partial y_e}{\partial \theta_2}
-\end{bmatrix}
-$$
-
-From the FK equations:
+**The Jacobian matrix** $J$ is a small table of sensitivities. Each entry says how far one coordinate of the end-effector moves when one joint turns by a small angle. Row 1 is for $x_e$ and row 2 for $y_e$. Column 1 is for $\theta_1$ and column 2 for $\theta_2$. From the two FK equations:
 
 $$
 J = \begin{bmatrix}
@@ -574,9 +575,13 @@ L_1 \cos(\theta_1) + L_2 \cos(\theta_1 + \theta_2) & L_2 \cos(\theta_1 + \theta_
 \end{bmatrix}
 $$
 
+So $J$ turns a small joint motion into a hand motion, and its inverse $J^{-1}$ in step 6 turns a wanted hand motion back into a joint motion. [Velocity Kinematics and the Jacobian](/education/robotics/velocity-kinematics-jacobian/) derives it.
+
 :::note[Singularity Warning]
-The Jacobian becomes singular (non-invertible) when $\theta_2 = 0$ or $\theta_2 = \pi$. At these configurations, the arm is fully extended or fully folded, and the determinant $\det(J) = L_1 L_2 \sin(\theta_2) = 0$. Near singularities, use the damped least-squares (Levenberg-Marquardt) approach instead of a direct inverse.
+When the arm is straight or fully folded, both joints move the hand along the same line, and $J$ has no inverse. Such a pose is called a singularity. The program below uses a safer form of step 6, damped least squares: a small number (`damping`) keeps the correction limited.
 :::
+
+For the target (500, 200) mm and the default first guess, the program arrives in 6 corrections at $\theta_1 = -11.52°$ and $\theta_2 = 80.41°$. This is the elbow-down solution found by geometry.
 
 ```python
 def jacobian_2R(L1, L2, theta1, theta2):
@@ -701,7 +706,9 @@ def plot_ik_convergence(history, title="Numerical IK Convergence"):
 
 ### Effect of Initial Guess on Solution
 
-The numerical IK result depends on the initial guess. Different starting configurations converge to different valid solutions (or may fail to converge altogether). This is both a feature and a challenge: you can steer the solver toward a preferred configuration (e.g., elbow-up) by choosing an appropriate initial guess, but you must be aware that the solver may find an unexpected configuration if the guess is poor.
+The numerical method returns one solution, and the first guess decides which one: usually the pose nearest to the guess. A poor guess can end at the pose you did not want, or fail to settle.
+
+The program below tries four guesses for the target (400, 300) mm. Three end at $\theta_1 = 0°$, $\theta_2 = 90°$ and one ends at $\theta_1 = 73.7°$, $\theta_2 = -90°$. Read the printed names the other way round here too.
 
 ```python
 # Demonstrate that different initial guesses yield different solutions
@@ -710,8 +717,8 @@ target = (400, 300)
 
 initial_guesses = [
     ([0.3, 0.3], "Small positive angles"),
-    ([1.0, -1.0], "Elbow-down bias"),
-    ([0.8, 1.2], "Elbow-up bias"),
+    ([1.0, -1.0], "Elbow-up bias"),
+    ([0.8, 1.2], "Elbow-down bias"),
     ([-0.5, 2.0], "Negative theta1"),
 ]
 
@@ -720,7 +727,7 @@ for q0, label in initial_guesses:
     result, _ = numerical_ik_2R(L1, L2, *target, q0=q0, tol=1e-6)
     if result:
         t1, t2 = result
-        config = "elbow-up" if t2 > 0 else "elbow-down"
+        config = "elbow-down" if t2 > 0 else "elbow-up"
         print(f"  {label}: theta1={np.degrees(t1):.1f} deg, "
               f"theta2={np.degrees(t2):.1f} deg ({config})")
 ```
@@ -732,29 +739,14 @@ for q0, label in initial_guesses:
 
 <InArticleAd />
 
+The workspace of a robot is the set of all points the end-effector can reach. For a planar 2R arm it is a ring between two circles centred on the base:
 
-The workspace of a robot is the set of all points the end-effector can reach. For a 2R planar robot, the workspace is an annular region (a ring) between two concentric circles. The outer boundary has radius $r_{\max} = L_1 + L_2$ (arm fully extended). The inner boundary has radius $r_{\min} = |L_1 - L_2|$ (arm fully folded back). If $L_1 = L_2$, the inner boundary collapses to a single point at the origin, and the entire disk is reachable.
+- The outer circle has radius $r_{\max} = L_1 + L_2$, the arm stretched straight. For the welding arm, $400 + 300 = 700$ mm.
+- The inner circle has radius $r_{\min} = |L_1 - L_2|$, link 2 folded back along link 1. For the welding arm, $400 - 300 = 100$ mm.
 
-```text
-  Workspace of a 2R Robot (L1 != L2)
+If $L_1 = L_2$ the inner circle shrinks to the base and the whole disk can be reached.
 
-           . - ~ ~ ~ - .               outer boundary
-       . '       |         ' .         r_max = L1 + L2
-     /           |             \
-    |        . - - - .          |
-    |      /    |      \        |
-    |     |   (base)    |       |       inner boundary
-    |      \    |      /        |       r_min = |L1 - L2|
-    |        ' - - - '          |
-     \           |             /        reachable workspace
-       .         |          . '         = annular region
-         ' - . _ _ _ . - '             (shaded ring between circles)
-
-  Points inside inner circle: UNREACHABLE (arm cannot fold enough)
-  Points outside outer circle: UNREACHABLE (arm cannot extend enough)
-  Points in the ring: REACHABLE (2 solutions: elbow-up, elbow-down)
-  Points on outer circle: REACHABLE (1 solution: arm fully extended)
-```
+A target in the ring has two solutions, a target exactly on either circle has one, and a target anywhere else has none. The program below marks 5,000 random poses of the welding arm and draws the two circles over them.
 
 ```python
 def plot_workspace_2R(L1, L2, n_samples=5000):
@@ -806,6 +798,8 @@ def plot_workspace_2R(L1, L2, n_samples=5000):
 
 ### Reachability Check
 
+A controller should first test the target against the two circles. The function below also warns when a target is within 35 mm of either circle. Of its five test points, (710, 0) is outside by 10 mm, and (690, 0) and (80, 80) can be reached but receive the warning.
+
 ```python
 def check_reachability(L1, L2, x_t, y_t):
     """Check if a target point is within the workspace.
@@ -848,7 +842,7 @@ test_points = [
     (500, 200, "Interior point"),
     (690, 0,   "Near outer boundary"),
     (710, 0,   "Outside workspace"),
-    (50, 50,   "Near inner boundary"),
+    (80, 80,   "Near inner boundary"),
     (300, 400, "Moderate distance"),
 ]
 
@@ -865,8 +859,9 @@ for x, y, label in test_points:
 
 <InArticleAd />
 
+The weld seam is an arc of radius 150 mm about the point (350, 250) mm, cut into 15 waypoints. For each one the program checks the reach, solves the inverse kinematics by geometry, and warns if the joint angles jump.
 
-We now return to the original welding challenge and apply both FK and IK to trace a curved seam path. The seam is defined as a sequence of waypoints along an arc on the pressure vessel surface. The robot must compute joint angles for each waypoint, check reachability, select the appropriate elbow configuration for smooth motion, and verify the path before execution.
+All 15 waypoints can be reached. The farthest is 580 mm from the base. The program selects the solution with $\theta_2 > 0$ (elbow-down, the setting passed to it). Along the seam $\theta_1$ rises smoothly from $-15.9°$ to $11.8°$, and $\theta_2$ stays between $68.9°$ and $87.4°$, far from the straight arm.
 
 ```python
 def welding_seam_path(cx, cy, radius, start_angle, end_angle, n_points=20):
@@ -887,7 +882,7 @@ def welding_seam_path(cx, cy, radius, start_angle, end_angle, n_points=20):
                   cy + radius * np.sin(a)) for a in angles]
     return waypoints
 
-def plan_weld_path(L1, L2, waypoints, elbow_config="up"):
+def plan_weld_path(L1, L2, waypoints, elbow_config="down"):
     """Plan joint trajectories for a weld seam using geometric IK.
 
     Args:
@@ -902,7 +897,8 @@ def plan_weld_path(L1, L2, waypoints, elbow_config="up"):
     joint_trajectory = []
     status_list = []
 
-    sol_idx = 0 if elbow_config == "up" else 1
+    # Index 0 is the solution with theta2 > 0, which is elbow-down for a target to the right.
+    sol_idx = 0 if elbow_config == "down" else 1
 
     for i, (x, y) in enumerate(waypoints):
         reach = check_reachability(L1, L2, x, y)
@@ -949,7 +945,7 @@ print("=== Weld Path Planning ===")
 print(f"Robot: L1={L1} mm, L2={L2} mm")
 print(f"Seam: {len(waypoints)} waypoints\n")
 
-trajectory, statuses = plan_weld_path(L1, L2, waypoints, elbow_config="up")
+trajectory, statuses = plan_weld_path(L1, L2, waypoints, elbow_config="down")
 
 # Display results
 print(f"\n{'Pt':>3}  {'x':>8}  {'y':>8}  {'θ1 (deg)':>10}  {'θ2 (deg)':>10}  {'Status':>12}")
@@ -1023,51 +1019,54 @@ def plot_weld_path(L1, L2, waypoints, trajectory):
 # plot_weld_path(L1, L2, waypoints, trajectory)
 ```
 
+:::tip[Instrument it]
+Forward kinematics turns measured joint angles into the tool's actual pose, so the encoders already on the robot are your check on whether it reached the commanded point. Read each joint's encoder (a magnetic AS5600 on a light joint, or the motor's quadrature encoder) and run forward kinematics on board to compare the achieved pose against the target. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) does that math live, and the positioning error can be [logged and trended on siliconwit.io](https://siliconwit.io) so backlash and a drooping link show up before they spoil a part.
+:::
+
 ## Design Guidelines
 
 <InArticleAd />
 
-
 <CardGrid>
   <Card title="Always Verify FK After IK" icon="approve-check">
-    After computing joint angles from IK, run them back through FK to confirm the end-effector lands at the target. Round-trip verification catches numerical errors, especially near workspace boundaries where small angle changes produce large position shifts.
+    Put the joint angles from IK back into FK and check that the end-effector lands on the target.
   </Card>
 
   <Card title="Choose Elbow Configuration Deliberately" icon="setting">
-    For continuous path following (welding, painting, gluing), maintain a consistent elbow configuration throughout the trajectory. Switching between elbow-up and elbow-down mid-path causes discontinuous joint motion and may damage the workpiece or the robot.
+    For a continuous path (welding, painting, gluing), keep one elbow configuration from start to end. A change in the middle makes the joints jump and can damage the workpiece or the robot.
   </Card>
 
   <Card title="Avoid Workspace Boundaries" icon="warning">
-    Near the outer boundary ($r \approx L_1 + L_2$), joint velocities spike because small Cartesian displacements require large joint angle changes. Plan paths with at least 5-10% margin from the workspace limits. If a waypoint must be near the boundary, reduce the Cartesian velocity for that segment.
+    Near the outer circle the arm is almost straight, and a small motion of the hand along the arm needs a large change of joint angles. Keep paths 5 to 10% of the reach inside the limits, or move more slowly there.
   </Card>
 
   <Card title="Use Damped Least-Squares for Numerical IK" icon="approve-check">
-    The standard Jacobian inverse fails at singular configurations ($\theta_2 = 0$ or $\pi$). The damped least-squares (Levenberg-Marquardt) method adds a small regularization term $\lambda^2 I$ to $J^T J$, trading off accuracy for stability. Typical damping values range from $10^{-4}$ to $10^{-2}$.
+    The plain inverse of the Jacobian fails when the arm is straight or folded. Damped least squares adds a small term $\lambda^2 I$ to $J^T J$. Typical values of $\lambda^2$ are $10^{-4}$ to $10^{-2}$.
   </Card>
 
   <Card title="Initial Guess Strategy" icon="setting">
-    For trajectory following, use the previous waypoint's solution as the initial guess for the next waypoint. This exploits the continuity of the path and typically converges in 2 to 4 iterations. For the first point, use a known home configuration or a random guess within expected joint limits.
+    Along a path, use the solution of the last waypoint as the first guess for the next one. The solver then needs only a few corrections and stays in the same elbow configuration.
   </Card>
 
   <Card title="Handle Unreachable Points Gracefully" icon="warning">
-    In production systems, the path planner must detect unreachable waypoints before execution begins. Options include repositioning the robot base, splitting the task across multiple setups, or using a robot with longer reach. Never allow the controller to attempt IK on an unreachable target without a fallback strategy.
+    Find the waypoints that cannot be reached before the robot moves. Then move the robot base, split the task into two setups, or use a robot with a longer reach.
   </Card>
 
   <Card title="Check Joint Limits After IK" icon="warning">
-    The geometric IK function above returns mathematically valid angles but does not know about your robot's joint limits. A target can be inside the reachable workspace and still require a joint angle outside `[theta_min, theta_max]`. Wrap every IK call with a limit check:
+    The geometric IK function knows nothing about joint limits. A target inside the ring can still need a joint angle outside `[theta_min, theta_max]`. Follow every IK call with a limit check:
 
     ```python
     for (t1, t2) in solutions:
         if (theta1_min <= t1 <= theta1_max
                 and theta2_min <= t2 <= theta2_max):
-            # use this solution
+            chosen = (t1, t2)  # use this solution
     ```
 
-    If no solution satisfies the limits, the target is unreachable in practice even though it is inside the ideal workspace.
+    If no solution passes, the real robot cannot reach the target.
   </Card>
 
   <Card title="Be Consistent About Units" icon="information">
-    The examples here use millimeters for link lengths and radians for joint angles. Mixing unit systems is a classic bug source: passing degrees into `np.cos`, or millimeters into a function expecting meters. Pick one convention per codebase, document it at the module level, and convert only at the interface with the UI or hardware driver. Angles should travel as radians through every internal function.
+    The programs here use millimeters and radians. Two mistakes are common: degrees given to `np.cos`, and millimeters given to a function that expects meters. Choose one set of units and convert only where the program meets the operator or the hardware.
   </Card>
 </CardGrid>
 
@@ -1075,12 +1074,13 @@ def plot_weld_path(L1, L2, waypoints, trajectory):
 
 <InArticleAd />
 
+- **Forward kinematics** turns joint angles into one end-effector position: add the links, each with the cosine and sine of its direction. For longer arms, a DH table and a product of matrices do the same work.
+- **Inverse kinematics** turns a target into joint angles. A target inside the ring has two solutions, elbow-up and elbow-down. A target on the edge has one, and a target outside has none.
+- **The geometric method** is exact and fast, but exists only for simple arms.
+- **The numerical method** corrects a guess with the Jacobian. It works for any arm and returns one solution.
+- **For a path**, test every waypoint for reach and keep one elbow configuration.
 
-This lesson covered the two fundamental kinematic problems in robotics. Forward kinematics computes end-effector position from joint angles using either direct trigonometric equations or the systematic DH parameter framework. For the 2R planar robot, the FK equations are simple: $x_e = L_1 \cos\theta_1 + L_2 \cos(\theta_1 + \theta_2)$ and $y_e = L_1 \sin\theta_1 + L_2 \sin(\theta_1 + \theta_2)$. Inverse kinematics reverses this mapping. The geometric approach yields closed-form solutions using the law of cosines and atan2, producing two solutions (elbow-up and elbow-down) for interior workspace points. The numerical Jacobian-based approach handles arbitrary robot configurations through iterative refinement, with damped least-squares providing robustness near singularities. Both methods were applied to a robotic welding application, demonstrating path planning, reachability checking, and configuration selection for smooth seam following.
-
-**Next lesson:** [Orientation and Quaternions](./orientation-quaternions) extends kinematic analysis to 3D rotations, covering Euler angles, gimbal lock, quaternion math, and SLERP interpolation for smooth orientation control.
-
-
+**Next lesson:** [Orientation and Quaternions](/education/robotics/orientation-quaternions/) describes which way the tool points in 3D.
 
 <InArticleAd />
 <RoboticsComments />
