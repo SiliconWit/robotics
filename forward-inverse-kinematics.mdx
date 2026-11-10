@@ -708,7 +708,7 @@ def plot_ik_convergence(history, title="Numerical IK Convergence"):
 
 The numerical method returns one solution, and the first guess decides which one: usually the pose nearest to the guess. A poor guess can end at the pose you did not want, or fail to settle.
 
-The program below tries four guesses for the target (400, 300) mm. Three end at $\theta_1 = 0°$, $\theta_2 = 90°$ and one ends at $\theta_1 = 73.7°$, $\theta_2 = -90°$. Read the printed names the other way round here too.
+The program below tries four guesses for the target (400, 300) mm. Three end at $\theta_1 = 0°$, $\theta_2 = 90°$ and one ends at $\theta_1 = 73.7°$, $\theta_2 = -90°$. The printed names follow the rule above: $\theta_2 > 0$ is elbow-down, $\theta_2 < 0$ is elbow-up.
 
 ```python
 # Demonstrate that different initial guesses yield different solutions
