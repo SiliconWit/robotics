@@ -56,7 +56,7 @@ Three quantities describe the motion of a joint. Velocity is how fast the angle 
 
 A motor cannot change its velocity in no time. That would need an acceleration without limit, and so a torque without limit. A trajectory that asks for it gets vibration, an arm that falls behind the plan, and stress in the gears.
 
-A standing passenger in a bus feels the same thing. At a steady speed, however high, standing is easy. The passenger is thrown when the driver brakes or pulls away sharply, which is when the acceleration changes suddenly. A box in a gripper is that passenger. So a good trajectory has a velocity with no jumps, and for a fragile load an acceleration with no jumps.
+A standing passenger in a bus feels the same thing: a steady speed, however high, is easy, but a sharp start or stop (a sudden change of acceleration) throws them. A box in a gripper is that passenger. So a good trajectory has a velocity with no jumps, and for a fragile load an acceleration with no jumps.
 
 ## Fundamental Theory
 
@@ -136,7 +136,7 @@ $$
 \dot{q}(t) = \frac{q_f - q_0}{t_f}
 $$
 
-A move of $90°$ in 2 s has $\dot{q} = 90 / 2 = 45$ deg/s for the whole move. The problem is at the two ends. The velocity must jump from zero to 45 deg/s at $t=0$ and back to zero at $t=t_f$, and a jump in velocity needs an acceleration without limit. Linear interpolation is therefore used only as a part of better methods, such as the cruise part of the trapezoidal profile below.
+A move of $90°$ in 2 s has $\dot{q} = 90 / 2 = 45$ deg/s for the whole move, so the velocity must jump from zero to 45 deg/s at $t=0$ and back to zero at $t=t_f$, and a jump in velocity needs an acceleration without limit. Linear interpolation is therefore used only as a part of better methods, such as the cruise part of the trapezoidal profile below.
 
 ### Cubic Polynomial Interpolation
 
@@ -271,7 +271,7 @@ Use a cubic when a jump in acceleration at the two ends does no harm. Use a quin
 
 ### Trapezoidal Velocity Profile
 
-A polynomial is given a duration, and its peak velocity and acceleration follow from it. A motor works the other way round: it has a largest velocity $v_{max}$ and a largest acceleration $a_{max}$, and the question is how fast the move can be. The answer is to use each limit fully: speed up at $a_{max}$, cruise at $v_{max}$, slow down at $a_{max}$. Plotted against time, the velocity has the shape of a trapezoid. No other motion inside the two limits is faster.
+A polynomial is given a duration, and its peak velocity and acceleration follow from it. A motor works the other way round: given its largest velocity $v_{max}$ and largest acceleration $a_{max}$, how fast can the move be? Use each limit fully, as a lift does between floors: speed up at $a_{max}$, cruise at $v_{max}$, slow down at $a_{max}$. The velocity against time is then a trapezoid, and no other motion inside the two limits is faster.
 
 ```text
   velocity

@@ -327,11 +327,11 @@ In most six-joint industrial robots, the first three joints place the wrist and 
 
 <InArticleAd />
 
-Inverse kinematics is the harder question. The target position $(x_t, y_t)$ of the end-effector is known, and we need the joint angles $(\theta_1, \theta_2)$ that put it there. Forward kinematics always has exactly one answer. Inverse kinematics can have none, one or several.
+Inverse kinematics is the harder question: from a known target position $(x_t, y_t)$, find the joint angles $(\theta_1, \theta_2)$ that put the end-effector there. Forward kinematics always has exactly one answer. Inverse kinematics can have none, one or several.
 
 ### Two answers for one target
 
-Touch a point on the table with one fingertip. You can do it with your elbow high or low, and the fingertip does not move. A two-link arm has the same choice: two solutions for a target inside the reachable region, one for a target exactly on its edge, and none outside it.
+Touch a point on the table with one fingertip: your elbow can be high or low, and the fingertip does not move. A two-link arm has the same choice, with two solutions for a target inside the reachable region, one for a target exactly on its edge, and none outside it.
 
 The two solutions are mirror images in the line from base to target, and are named by where the elbow sits. For a target to the right of the base, as in all examples here:
 

@@ -55,7 +55,7 @@ A camera drone tilts and turns in the wind, and the camera must stay level. A gi
 
 The familiar way to store an orientation is three angles: yaw (turn left or right), pitch (tilt up or down) and roll (lean sideways). They are called Euler angles. People read them easily, and for small turns they work well.
 
-They have one weak pose. The three turns are made one after another, each about its own axis. When the middle turn reaches 90 degrees, the axis of the first turn and the axis of the third turn point along the same line. Two motors now do the same thing, and one direction of turning is lost. This pose has a name: gimbal lock. Near it, the motors must spin very fast to make a small turn. A quaternion does not have such a pose.
+They have one weak pose. The three turns are made one after another, each about its own axis, and when the middle turn reaches 90 degrees the first and third axes lie on one line. Two motors then do the same thing, and one direction of turning is lost. This is gimbal lock. Near it, the motors must spin very fast to make a small turn. A quaternion has no such pose.
 
 ## Fundamental Theory: Quaternion-Based Orientation
 
@@ -399,7 +399,7 @@ def slerp_safe(q0, q1, t):
     return s0 * q0 + s1 * q1
 ```
 
-The same check belongs in any controller that follows a target orientation. In every control cycle, calculate $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and change the sign of the target if the result is negative. Without the check, the robot can make almost a full turn between two orientations that are close together.
+The same check belongs in any controller that follows a target orientation. In every control cycle, calculate $\mathbf{q}_{\text{current}} \cdot \mathbf{q}_{\text{target}}$ and change the sign of the target if the result is negative. Without the check, the robot can turn almost a full circle between two close orientations.
 </Card>
 
 ```python
@@ -681,7 +681,7 @@ print("Euler interpolation has variable speed and may produce unexpected paths")
 <InArticleAd />
 
 
-The drone body turns in the wind, and the camera must keep pointing the same way. The gimbal must therefore turn the camera by exactly the turn that cancels the motion of the body. An IMU (inertial measurement unit, a sensor that reports how the body is oriented) gives the body orientation as a quaternion. One quaternion multiplication gives the turn the gimbal must make, and SLERP limits how fast the gimbal moves toward it.
+To keep the camera pointing the same way, the gimbal must make exactly the turn that cancels the motion of the drone body. An IMU (inertial measurement unit, a sensor that reports how the body is oriented) gives the body orientation as a quaternion. One quaternion multiplication gives the turn the gimbal must make, and SLERP limits how fast the gimbal moves toward it.
 
 ```mermaid
 flowchart TD

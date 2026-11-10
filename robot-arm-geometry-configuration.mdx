@@ -67,7 +67,7 @@ The wrong robot type is an expensive mistake, because it is found after the robo
 
 ### Links and Joints: The Building Blocks
 
-In your own arm, the upper arm and the forearm are stiff parts, and the shoulder and the elbow let them turn. A robot arm is built the same way. The stiff parts are called links, and the moving connections between them are called joints. The first link is the base, fixed to the floor. The last link carries the end-effector, the tool at the end of the arm: a gripper, a welding torch or a sensor. This lesson also calls it the hand.
+A robot arm is built like your own: stiff parts called links (your upper arm and forearm) turn at moving connections called joints (your shoulder and elbow). The first link is the base, fixed to the floor. The last link carries the end-effector, the tool at the end of the arm: a gripper, a welding torch or a sensor. This lesson also calls it the hand.
 
 Each joint gives the arm one or more degrees of freedom (DOF). One degree of freedom is one independent way to move, such as one turn or one slide.
 
@@ -189,7 +189,7 @@ The arm has more DOF than the task needs. It can use the extra ones to keep its 
 
 The link lengths set the size and the shape of the region the hand can reach. Longer links reach further, but they bend more and carry less. Shorter links are stiffer and more exact, but they cover less space.
 
-The simplest case is a planar 2R arm: two links that move in one flat plane, joined by two revolute joints. Call the link lengths $l_1$ and $l_2$, in metres. The hand is furthest from the base when the arm is stretched straight, and nearest when link 2 is folded back along link 1:
+The simplest case is a planar 2R arm: two links of lengths $l_1$ and $l_2$ (in metres), joined by two revolute joints and moving in one flat plane. The hand is furthest from the base with the arm stretched straight, and nearest with link 2 folded back along link 1:
 
 ```text
   Stretched: the hand is as far away as it can go
@@ -209,7 +209,7 @@ The simplest case is a planar 2R arm: two links that move in one flat plane, joi
 - **Minimum reach:** $r_{\min} = |l_1 - l_2|$ (the bars mean "the difference, taken as a positive number")
 - **Workspace shape:** a ring (annulus) between the radius $r_{\min}$ and the radius $r_{\max}$
 
-With $l_1 = 0.5$ m and $l_2 = 0.3$ m, $r_{\max} = 0.5 + 0.3 = 0.8$ m and $r_{\min} = 0.5 - 0.3 = 0.2$ m. The hand cannot come closer to the base than 0.2 m, so a hole is left around the base. When $l_1 = l_2$ the hole closes and the workspace is a full disk.
+With $l_1 = 0.5$ m and $l_2 = 0.3$ m, $r_{\max} = 0.5 + 0.3 = 0.8$ m and $r_{\min} = 0.5 - 0.3 = 0.2$ m: a ring, like a flat doughnut, with a hole of 0.2 m around the base that the hand cannot reach. When $l_1 = l_2$ the hole closes and the workspace is a full disk.
 
 ### Workspace Analysis: Reachable vs. Dexterous
 
@@ -225,7 +225,7 @@ A robot may take a board from straight above and place it into a tray at an angl
 
 ### Joint Limits and Their Impact
 
-A real joint cannot turn or slide without end. Mechanical stops, cables and safety rules limit every joint variable. These limits cut the ideal ring to a smaller region, often with an odd shape.
+Mechanical stops, cables and safety rules limit every joint variable. These limits cut the ideal ring to a smaller region, often with an odd shape.
 
 For a 2R arm where $\theta_1$ (the angle of link 1) and $\theta_2$ (the angle of link 2 measured from link 1) each have a smallest and a largest value:
 
@@ -382,7 +382,7 @@ Choose it for heavy loads and large rectangular areas.
 <InArticleAd />
 
 
-A program can draw the workspace of a planar 2R arm. It needs one rule, called forward kinematics: where is the hand for a given pair of joint angles? The program applies it to many pairs of angles and marks every point.
+A program draws the workspace of a planar 2R arm with one rule, called forward kinematics (where is the hand for a given pair of joint angles?), applied to many pairs of angles, marking every point.
 
 ### Forward Kinematics of a 2R Planar Arm
 
@@ -748,7 +748,7 @@ compare_configurations()
 <InArticleAd />
 
 
-Now return to the circuit board cell. The positions of the three stations tell us how far the hand must reach, and the floor area limits the robot types we can use.
+Back to the circuit board cell: the three station positions set how far the hand must reach, and the floor area limits the robot types.
 
 ### Station Layout Analysis
 
