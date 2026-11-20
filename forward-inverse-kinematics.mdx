@@ -1020,7 +1020,7 @@ def plot_weld_path(L1, L2, waypoints, trajectory):
 ```
 
 :::tip[Instrument it]
-Forward kinematics turns measured joint angles into the tool's actual pose, so the encoders already on the robot are your check on whether it reached the commanded point. Read each joint's encoder (a magnetic AS5600 on a light joint, or the motor's quadrature encoder) and run forward kinematics on board to compare the achieved pose against the target. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) does that math live, and the positioning error can be [logged and trended on siliconwit.io](https://siliconwit.io) so backlash and a drooping link show up before they spoil a part.
+Forward kinematics turns measured joint angles into the tool's actual pose, so the encoders already on the robot are your check on whether it reached the commanded point. Read each joint's encoder (a magnetic AS5600 on a light joint, or the motor's quadrature encoder) and run forward kinematics on board to compare the achieved pose against the target. An [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) does that math live, and the positioning error can go over MQTT to a broker you run, or to [siliconwit.io](https://siliconwit.io), our monitoring service, which keeps its trend so backlash and a drooping link show up before they spoil a part.
 :::
 
 ## Design Guidelines

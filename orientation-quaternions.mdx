@@ -833,7 +833,7 @@ A surgical robot turns its tool from one pose to another, for example from a vie
 </details>
 
 :::tip[Instrument it]
-Quaternions and SLERP describe and blend orientation, and an IMU measures it. A 9-axis sensor (BNO055 or ICM-20948) reports orientation as a quaternion directly, so you can compare its output with the interpolation you calculated, and see that the quaternion stays well behaved where the Euler angles jump. Connect it to an [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) and [stream the live quaternion to siliconwit.io](https://siliconwit.io) to see drift build up and the magnetometer pull it back.
+Quaternions and SLERP describe and blend orientation, and an IMU measures it. A 9-axis sensor (BNO055 or ICM-20948) reports orientation as a quaternion directly, so you can compare its output with the interpolation you calculated, and see that the quaternion stays well behaved where the Euler angles jump. Connect it to an [ESP32 or STM32](/education/sensor-actuator-interfacing-stm32/) and [stream the live quaternion](/education/iot-systems/) to see drift build up and the magnetometer pull it back.
 :::
 
 ## Design Guidelines: Choosing Orientation Representations
